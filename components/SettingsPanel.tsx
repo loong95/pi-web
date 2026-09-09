@@ -29,6 +29,7 @@ import { setupPushSubscription } from "@/lib/push-client";
 import { SkillsConfig } from "./SkillsConfig";
 import { AgentsConfig } from "./AgentsConfig";
 import { PluginsConfig } from "./PluginsConfig";
+import { PlantUmlSettings } from "./PlantUmlSettings";
 import { ConfigButton, ConfigSwitch } from "./SettingsUi";
 
 interface Props {
@@ -267,6 +268,8 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
           </div>
         </div>
       </section>
+
+      <PlantUmlSettings />
 
       {shellSettings?.isWindows && (
         <section className="settings-general-section">

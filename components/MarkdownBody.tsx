@@ -7,6 +7,8 @@ import { encodeFilePathForApi } from "@/lib/file-paths";
 import { markdownRehypePlugins, markdownRemarkPlugins, markdownUrlTransform, normalizeDisplayMath } from "@/lib/markdown";
 import { ImagePreview } from "./ImagePreview";
 import { MermaidBlock, CodeBlock } from "./MermaidBlock";
+import { PlantUmlBlock } from "./PlantUmlBlock";
+import { isPlantUmlLanguage } from "@/lib/plantuml-languages";
 
 const MarkdownLinkContext = createContext(false);
 
@@ -55,6 +57,16 @@ export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile
           return (
             <MermaidBlock
               code={raw.replace(/\n$/, "")}
+              isStreaming={isStreaming}
+              defaultPreview
+            />
+          );
+        }
+        if (isPlantUmlLanguage(lang)) {
+          return (
+            <PlantUmlBlock
+              code={raw.replace(/\n$/, "")}
+              lang={lang}
               isStreaming={isStreaming}
               defaultPreview
             />

@@ -23,6 +23,8 @@ import { parsePdfPageFragment, resolveLocalFileHref, shouldOpenLocalFileInApp } 
 import { parseFrontmatter } from "@/lib/frontmatter";
 import { markdownPreviewRehypePlugins, markdownPreviewRemarkPlugins, markdownUrlTransform, normalizeDisplayMath } from "@/lib/markdown";
 import { CodeBlock, MermaidBlock } from "./MermaidBlock";
+import { PlantUmlBlock } from "./PlantUmlBlock";
+import { isPlantUmlLanguage } from "@/lib/plantuml-languages";
 import { FrontmatterCard } from "./FrontmatterCard";
 import { parseUnifiedPatch } from "@/lib/patch";
 import type { GitFileDiffResponse } from "@/lib/git-types";
@@ -1730,6 +1732,9 @@ function TextFileViewer({
                   if (isBlock) {
                     if (lang === "mermaid") {
                       return <MermaidBlock code={raw.replace(/\n$/, "")} defaultPreview />;
+                    }
+                    if (isPlantUmlLanguage(lang)) {
+                      return <PlantUmlBlock code={raw.replace(/\n$/, "")} lang={lang} defaultPreview />;
                     }
                     return <CodeBlock code={raw.replace(/\n$/, "")} lang={lang} />;
                   }

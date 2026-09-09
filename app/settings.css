@@ -1124,6 +1124,43 @@
   line-height: 1.5;
 }
 
+.settings-plantuml-controls {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  max-width: 520px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.settings-plantuml-controls input {
+  width: 100%;
+  height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  outline: none;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.settings-plantuml-controls input:focus {
+  border-color: var(--accent);
+}
+
+.settings-plantuml-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-plantuml-success {
+  margin: 8px 0 0;
+  color: #22c55e;
+  font-size: 11px;
+}
+
 .settings-theme-options {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

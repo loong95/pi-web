@@ -27,6 +27,8 @@ import { isExternalMarkdownHref, jumpToMarkdownFragment, markdownAppUrlTransform
 import { CodeBlock, MermaidBlock } from "./MermaidBlock";
 import { DelimitedTable } from "./DelimitedTable";
 import { isDelimitedTablePath } from "@/lib/delimited-table";
+import { PlantUmlBlock } from "./PlantUmlBlock";
+import { isPlantUmlLanguage } from "@/lib/plantuml-languages";
 import { FrontmatterCard } from "./FrontmatterCard";
 import { diffGapLabel, parseUnifiedPatch, unifiedDiffLines, type SplitDiffGap, type UnifiedDiffLine } from "@/lib/patch";
 import type { GitFileDiffResponse } from "@/lib/git-types";
@@ -1855,6 +1857,9 @@ function TextFileViewer({
                   if (isBlock) {
                     if (lang === "mermaid") {
                       return <MermaidBlock code={raw.replace(/\n$/, "")} defaultPreview />;
+                    }
+                    if (isPlantUmlLanguage(lang)) {
+                      return <PlantUmlBlock code={raw.replace(/\n$/, "")} lang={lang} defaultPreview />;
                     }
                     return <CodeBlock code={raw.replace(/\n$/, "")} lang={lang} />;
                   }

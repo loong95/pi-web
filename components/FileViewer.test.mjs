@@ -6,6 +6,12 @@ import ts from "typescript";
 
 const source = await readFile(new URL("./FileViewer.tsx", import.meta.url), "utf8");
 
+test("PlantUML fences use the shared PlantUmlBlock in the file preview", () => {
+  assert.match(source, /import \{ PlantUmlBlock \} from "\.\/PlantUmlBlock";/);
+  assert.match(source, /isPlantUmlLanguage\(lang\)/);
+  assert.match(source, /<PlantUmlBlock/);
+});
+
 test("large source previews bypass the per-line syntax highlighter", () => {
   assert.match(source, /const SOURCE_HIGHLIGHT_MAX_LINES = 1_000;/);
   assert.match(source, /const useLightweightSource = sourceLines\.length > SOURCE_HIGHLIGHT_MAX_LINES/);

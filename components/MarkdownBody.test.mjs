@@ -144,3 +144,20 @@ test("keeps Mermaid source visible while the response is streaming", () => {
   assert.match(html, />Preview</);
   assert.match(html, /A --&gt; B/);
 });
+
+test("dispatches supported PlantUML fence languages to the disabled source fallback", () => {
+  for (const language of ["plantuml", "puml", "wsd"]) {
+    const html = renderMarkdown(`\`\`\`${language}\n@startuml\nAlice -> Bob\n@enduml\n\`\`\``);
+    assert.doesNotMatch(html, /plantuml-block-loading/, language);
+    assert.match(html, new RegExp(`>${language}<`), language);
+    assert.match(html, /Alice/, language);
+  }
+});
+
+test("keeps PlantUML source visible while the response is streaming", () => {
+  const html = renderMarkdown("```plantuml\n@startuml\nAlice -> Bob\n@enduml\n```", { isStreaming: true });
+
+  assert.doesNotMatch(html, /plantuml-block-loading/);
+  assert.doesNotMatch(html, />Preview</);
+  assert.match(html, /Alice -&gt; Bob/);
+});

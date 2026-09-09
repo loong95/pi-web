@@ -11,7 +11,9 @@ import { isExternalMarkdownHref, jumpToMarkdownFragment, markdownAppUrlTransform
 import { splitMarkdownBlocks } from "@/lib/markdown-blocks";
 import { ImagePreview } from "./ImagePreview";
 import { MermaidBlock, CodeBlock } from "./MermaidBlock";
+import { PlantUmlBlock } from "./PlantUmlBlock";
 import { SvgBlock } from "./SvgBlock";
+import { isPlantUmlLanguage } from "@/lib/plantuml-languages";
 
 const MarkdownLinkContext = createContext(false);
 
@@ -136,6 +138,16 @@ export const MarkdownBody = memo(function MarkdownBody({ children, className, is
         }
         if (lang === "svg") {
           return <SvgBlock code={raw.replace(/\n$/, "")} isStreaming={isStreaming} />;
+        }
+        if (isPlantUmlLanguage(lang)) {
+          return (
+            <PlantUmlBlock
+              code={raw.replace(/\n$/, "")}
+              lang={lang}
+              isStreaming={isStreaming}
+              defaultPreview
+            />
+          );
         }
         return <CodeBlock code={raw.replace(/\n$/, "")} lang={lang} isStreaming={isStreaming} />;
       }

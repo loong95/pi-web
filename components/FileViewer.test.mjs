@@ -6,6 +6,12 @@ import ts from "typescript";
 
 const source = await readFile(new URL("./FileViewer.tsx", import.meta.url), "utf8");
 
+test("PlantUML fences use the shared PlantUmlBlock in the file preview", () => {
+  assert.match(source, /import \{ PlantUmlBlock \} from "\.\/PlantUmlBlock";/);
+  assert.match(source, /isPlantUmlLanguage\(lang\)/);
+  assert.match(source, /<PlantUmlBlock/);
+});
+
 test("lightweight source rows are skipped for highlighted, diff, and preview views", () => {
   // Execute the source-view calculations without mounting the file-fetching component.
   const file = ts.createSourceFile("FileViewer.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);

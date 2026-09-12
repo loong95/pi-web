@@ -25,12 +25,27 @@ test("opens one settings panel from direct sidebar shortcuts", () => {
 });
 
 test("keeps every requested configuration surface inside the settings panel", () => {
-  for (const section of ["general", "models", "skills", "agents", "plugins"]) {
+  for (const section of ["general", "models", "skills", "agents", "plugins", "experimental"]) {
     assert.match(panelSource, new RegExp(`id: "${section}"`));
   }
   for (const component of ["ModelsConfig", "SkillsConfig", "AgentsConfig", "PluginsConfig"]) {
     assert.match(panelSource, new RegExp(`<${component} embedded`));
   }
+});
+
+test("lists the Experimental tab last and moves PlantUML into it", async () => {
+  const experimentalSource = await readFile(new URL("./ExperimentalSettings.tsx", import.meta.url), "utf8");
+  const tabsBlock = panelSource.slice(
+    panelSource.indexOf("const sections:"),
+    panelSource.indexOf("];", panelSource.indexOf("const sections:")),
+  );
+  assert.match(tabsBlock, /\{ id: "experimental", label: t\("settings\.experimental"\), requiresProject: false \},/);
+  assert.ok(tabsBlock.indexOf('id: "experimental"') > tabsBlock.indexOf('id: "plugins"'), "Experimental must be the last tab");
+  assert.match(panelSource, /sectionHost\("experimental", <ExperimentalSettings \/>\)/);
+  assert.doesNotMatch(panelSource, /<PlantUmlSettings \/>/);
+  assert.match(experimentalSource, /<PlantUmlSettings \/>/);
+  assert.match(experimentalSource, /t\("settings\.onlyCurrentWorktree"\)/);
+  assert.match(experimentalSource, /setWorktreeSessionScopeEnabled\(enabled\)/);
 });
 
 test("restores the settings section and each list detail selection", async () => {

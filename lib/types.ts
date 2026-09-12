@@ -342,6 +342,14 @@ export interface SessionInfo {
   branch?: string;
   /** True when cwd is a linked git worktree (not the main checkout) */
   isWorktree?: boolean;
+  /** Canonical top-level path of the checkout (main checkout or linked
+   *  worktree) that contains cwd. Absent for non-git dirs and removed
+   *  worktrees. Used to scope the sidebar to one worktree. */
+  worktreePath?: string;
+  /** Stable server-computed identity for worktreePath, case- and
+   *  separator-insensitive on Windows. Compare against the current worktree
+   *  key from /api/worktrees; never derive it in the browser. */
+  worktreeKey?: string;
   /** True while the runtime session exists only in memory and its JSONL file
    *  has not been created yet. Disk-backed actions must wait until this clears. */
   transient?: boolean;

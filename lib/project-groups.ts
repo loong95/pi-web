@@ -45,6 +45,32 @@ export function getProjectActivity(
   return counts;
 }
 
+/**
+ * Same aggregation as getProjectActivity, keyed by the checkout containing
+ * each session (SessionInfo.worktreeKey). Sessions without a resolvable
+ * checkout (non-git cwd, removed worktree, transient) are skipped so a
+ * worktree row only counts sessions that belong to it.
+ */
+export function getWorktreeActivity(
+  sessions: readonly SessionInfo[],
+  runningSessionIds: ReadonlySet<string>,
+  unreadSessionIds: ReadonlySet<string>,
+): Map<string, { running: number; unread: number }> {
+  const counts = new Map<string, { running: number; unread: number }>();
+  for (const session of sessions) {
+    const key = session.worktreeKey;
+    if (!key) continue;
+    let entry = counts.get(key);
+    if (!entry) {
+      entry = { running: 0, unread: 0 };
+      counts.set(key, entry);
+    }
+    if (runningSessionIds.has(session.id)) entry.running++;
+    if (unreadSessionIds.has(session.id)) entry.unread++;
+  }
+  return counts;
+}
+
 export function sessionsForProject(
   sessions: readonly SessionInfo[],
   projectKey: string,

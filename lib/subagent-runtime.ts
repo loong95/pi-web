@@ -10,7 +10,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { AgentSessionLike } from "./pi-types";
 import {
-  subagentFinalText,
+  subagentNotificationText,
   subagentToolDetails,
   type ResumeSubagentRequest,
   type StartSubagentRequest,
@@ -44,6 +44,10 @@ interface HostSession {
   readonly inner: AgentSessionLike;
   readonly sessionFile: string;
   readonly cwd: string;
+  sendCustomMessage(
+    message: Parameters<AgentSessionLike["sendCustomMessage"]>[0],
+    options?: NonNullable<Parameters<AgentSessionLike["sendCustomMessage"]>[1]>,
+  ): Promise<void>;
   isAlive(): boolean;
   isRunning(): boolean;
   waitUntilReady(): Promise<void>;
@@ -557,9 +561,9 @@ export function createSubagentController(
     }
     await parent.waitUntilReady();
     if (!parent.isAlive()) throw new Error(`Parent session is no longer available: ${run.parentSessionId}`);
-    await parent.inner.sendCustomMessage({
+    await parent.sendCustomMessage({
       customType: "pi-web:subagent-notification",
-      content: subagentFinalText(run),
+      content: subagentNotificationText(run),
       display: true,
       details: subagentToolDetails(run),
     }, { deliverAs: "followUp", triggerTurn: true });

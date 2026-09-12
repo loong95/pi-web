@@ -549,6 +549,20 @@ export class AgentSessionWrapper {
     }
   }
 
+  async sendCustomMessage(
+    message: Parameters<AgentSessionLike["sendCustomMessage"]>[0],
+    options?: NonNullable<Parameters<AgentSessionLike["sendCustomMessage"]>[1]>,
+  ): Promise<void> {
+    const releaseAdmission = await this.acquirePromptAdmission();
+    try {
+      if (!this._alive) throw new Error("Session is no longer available");
+      this.resetIdleTimer();
+      await this.inner.sendCustomMessage(message, options);
+    } finally {
+      releaseAdmission();
+    }
+  }
+
   async send(command: Record<string, unknown>): Promise<unknown> {
     const type = command.type as string;
     const allowedDuringReplacement = COMMANDS_ALLOWED_DURING_SESSION_REPLACEMENT.has(type);

@@ -6,8 +6,12 @@ import { listSessionFamilies } from "@/lib/session-family";
 import { loadExplorerOpen, saveExplorerOpen } from "@/lib/file-explorer-state";
 import { dispatchSessionRowContextMenu } from "@/lib/session-row-context-menu";
 import { skillExpansionToCommand } from "@/lib/slash-display";
-import { getProjectActivity, getRecentProjects, sessionsForProject } from "@/lib/project-groups";
+import { getProjectActivity, getRecentProjects, getWorktreeActivity, sessionsForProject } from "@/lib/project-groups";
 import { workspaceKeyOf } from "@/lib/workspace-memory";
+import {
+  isWorktreeSessionScopeEnabled,
+  WORKTREE_SESSION_SCOPE_EVENT,
+} from "@/lib/worktree-session-scope";
 import { formatRelativeTime } from "@/lib/i18n/format";
 import { useI18n } from "@/hooks/useI18n";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
@@ -136,6 +140,9 @@ interface WorktreeEntry {
   path: string;
   branch: string | null;
   isMain: boolean;
+  /** Server-computed identity for path; absent on the optimistic entry added
+   *  right after creating a worktree (which has no sessions yet anyway). */
+  key?: string;
 }
 
 interface WorktreeState {
@@ -150,6 +157,9 @@ interface WorktreeState {
   isTopLevel: boolean;
   /** Canonical path of the checkout containing forCwd, resolved server-side. */
   currentWorktreePath: string | null;
+  /** Case/separator-insensitive identity for currentWorktreePath; null when
+   *  forCwd is not inside a git checkout. */
+  currentWorktreeKey: string | null;
   worktrees: WorktreeEntry[];
 }
 
@@ -391,6 +401,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedCwd, setSelectedCwd] = useState<string | null>(null);
+  const [worktreeSessionScope, setWorktreeSessionScope] = useState(false);
   const [homeDir, setHomeDir] = useState<string>("");
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [projectFilter, setProjectFilter] = useState("");
@@ -717,6 +728,15 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     }).catch(() => {});
   }, []);
 
+  // Experimental worktree scoping is a browser preference: read it on mount
+  // and follow live changes made from Settings without a reload.
+  useEffect(() => {
+    const sync = () => setWorktreeSessionScope(isWorktreeSessionScopeEnabled());
+    sync();
+    window.addEventListener(WORKTREE_SESSION_SCOPE_EVENT, sync);
+    return () => window.removeEventListener(WORKTREE_SESSION_SCOPE_EVENT, sync);
+  }, []);
+
   const restoredRef = useRef(false);
 
   const projectSelection = useCallback((root: string, key: string): ProjectSelection => ({
@@ -788,7 +808,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     setWorktreeLoadingCwd(selectedCwd);
     fetch(`/api/worktrees?cwd=${encodeURIComponent(selectedCwd)}`)
       .then((r) => r.json())
-      .then((d: { projectRoot?: string; projectKey?: string; isGit?: boolean; isTopLevel?: boolean; currentWorktreePath?: string | null; worktrees?: WorktreeEntry[]; error?: string }) => {
+      .then((d: { projectRoot?: string; projectKey?: string; isGit?: boolean; isTopLevel?: boolean; currentWorktreePath?: string | null; currentWorktreeKey?: string | null; worktrees?: WorktreeEntry[]; error?: string }) => {
         if (cancelled) return;
         setWorktreeLoadingCwd(null);
         if (d.error || !d.projectRoot) {
@@ -802,6 +822,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           isGit: d.isGit ?? false,
           isTopLevel: d.isTopLevel ?? false,
           currentWorktreePath: d.currentWorktreePath ?? null,
+          currentWorktreeKey: d.currentWorktreeKey ?? null,
           worktrees: d.worktrees ?? [],
         });
       })
@@ -1030,6 +1051,13 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     [allSessions, runningSessionIds, unreadSessionIds],
   );
 
+  // Per-worktree counts so the worktree switcher can point at the checkout
+  // that actually has unread or running sessions.
+  const worktreeActivity = useMemo(
+    () => getWorktreeActivity(allSessions, runningSessionIds, unreadSessionIds),
+    [allSessions, runningSessionIds, unreadSessionIds],
+  );
+
   // Any activity in a project other than the one currently selected — shown as
   // a dot on the (collapsed) selector button so it is visible without opening
   // the dropdown.
@@ -1043,6 +1071,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const filteredSessions = selectedProject
     ? sessionsForProject(allSessions, selectedProject.key)
     : allSessions;
+  // Experimental: hide sessions belonging to the project's other worktrees.
+  // worktreeKey is server-computed, so this stays a plain string comparison.
+  const worktreeScopeKey = worktreeSessionScope ? worktreeState?.currentWorktreeKey ?? null : null;
+  const scopedSessions = worktreeScopeKey
+    ? filteredSessions.filter((session) => session.worktreeKey === worktreeScopeKey)
+    : filteredSessions;
   const showWorktreeSwitcher = Boolean(
     worktreeState?.isGit
     && worktreeState.isTopLevel
@@ -1072,7 +1106,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         }
       : null);
 
-  const sessionFamilies = listSessionFamilies(filteredSessions);
+  const sessionFamilies = listSessionFamilies(scopedSessions);
 
   const virtualIndices = getSessionListIndices(
     sessionFamilies.length,
@@ -1564,6 +1598,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                             )}
                             <PathLabel text={wt.branch ?? displayCwd(wt.path, homeDir)} style={{ flex: 1 }} />
                             {wt.isMain && <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 10 }}>{t("sidebar.main")}</span>}
+                            {showProjectActivity(wt.key ? worktreeActivity.get(wt.key) : undefined, t)}
                           </button>
                           {!wt.isMain && (
                             <button

@@ -109,6 +109,11 @@ test("subagents fold into their main session row, which carries their running, u
   const sessionRows = rows.filter((row) => row.kind === "session");
   assert.deepEqual(sessionRows.map((row) => row.family.root.id), ["main"]);
   assert.deepEqual(sessionRows[0].status, { running: true, awaiting: false, unread: true, selected: true, transient: false });
+  // The sidebar builds that model from the whole catalog, subagents included,
+  // narrowed by the experimental worktree scope (which is a no-op when off).
+  assert.match(source, /const model = useMemo\(\(\) => buildSessionTree\(\{\s*sessions: visibleSessions,/);
+  assert.match(source, /const visibleSessions = useMemo\(/);
+  assert.doesNotMatch(source, /function SessionItem|function SessionTreeItem|getSessionListIndices/);
 });
 
 test("only Shift skips the session deletion confirmation", () => {

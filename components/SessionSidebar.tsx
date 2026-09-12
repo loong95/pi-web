@@ -5,8 +5,12 @@ import type { SessionInfo } from "@/lib/types";
 import { listSessionFamilies, type SessionFamily } from "@/lib/session-family";
 import { dispatchSessionRowContextMenu } from "@/lib/session-row-context-menu";
 import { sessionDeepLink } from "@/lib/session-links";
-import { getProjectActivity, getRecentProjects } from "@/lib/project-groups";
+import { getProjectActivity, getRecentProjects, getWorktreeActivity, sessionsForProject } from "@/lib/project-groups";
 import { workspaceKeyOf } from "@/lib/workspace-memory";
+import {
+  isWorktreeSessionScopeEnabled,
+  WORKTREE_SESSION_SCOPE_EVENT,
+} from "@/lib/worktree-session-scope";
 import {
   adjacentProjectMove,
   buildArchiveRows,
@@ -262,6 +266,9 @@ interface WorktreeState {
   isTopLevel: boolean;
   /** Canonical path of the checkout containing forCwd, resolved server-side. */
   currentWorktreePath: string | null;
+  /** Case/separator-insensitive identity for currentWorktreePath; null when
+   *  forCwd is not inside a git checkout. */
+  currentWorktreeKey: string | null;
   worktrees: WorktreeEntry[];
 }
 
@@ -490,6 +497,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [sessionDetailsLoaded, setSessionDetailsLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedCwd, setSelectedCwd] = useState<string | null>(null);
+  const [worktreeSessionScope, setWorktreeSessionScope] = useState(false);
   const [homeDir, setHomeDir] = useState<string>("");
   // Open for the files tab's project list, or for the composer's bar ("new-session").
   const [customPathOpen, setCustomPathOpen] = useState<false | "files" | "new-session">(false);
@@ -995,6 +1003,15 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     }).catch(() => {});
   }, []);
 
+  // Experimental worktree scoping is a browser preference: read it on mount
+  // and follow live changes made from Settings without a reload.
+  useEffect(() => {
+    const sync = () => setWorktreeSessionScope(isWorktreeSessionScopeEnabled());
+    sync();
+    window.addEventListener(WORKTREE_SESSION_SCOPE_EVENT, sync);
+    return () => window.removeEventListener(WORKTREE_SESSION_SCOPE_EVENT, sync);
+  }, []);
+
   const restoredRef = useRef(false);
 
   const projectSelection = useCallback((root: string, key: string): ProjectSelection => ({
@@ -1077,7 +1094,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     setWorktreeLoadingCwd(selectedCwd);
     fetch(`/api/worktrees?cwd=${encodeURIComponent(selectedCwd)}`)
       .then((r) => r.json())
-      .then((d: { projectRoot?: string; projectKey?: string; isGit?: boolean; isTopLevel?: boolean; currentWorktreePath?: string | null; worktrees?: WorktreeEntry[]; error?: string }) => {
+      .then((d: { projectRoot?: string; projectKey?: string; isGit?: boolean; isTopLevel?: boolean; currentWorktreePath?: string | null; currentWorktreeKey?: string | null; worktrees?: WorktreeEntry[]; error?: string }) => {
         if (cancelled) return;
         setWorktreeLoadingCwd(null);
         if (d.error || !d.projectRoot) {
@@ -1094,6 +1111,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           isGit: d.isGit ?? false,
           isTopLevel: d.isTopLevel ?? false,
           currentWorktreePath: d.currentWorktreePath ?? null,
+          currentWorktreeKey: d.currentWorktreeKey ?? null,
           worktrees: d.worktrees ?? [],
         });
       })
@@ -1318,7 +1336,19 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
 
   const recentProjects = useMemo(() => getRecentProjects(allSessions), [allSessions]);
 
-  const sessionFamilies = useMemo(() => listSessionFamilies(allSessions), [allSessions]);
+  // Experimental: hide sessions belonging to the project's other worktrees.
+  // worktreeKey is server-computed, so this stays a plain string comparison.
+  // The tree below is built from this set, so the scope covers the project
+  // groups, the archive index and the activity counts alike.
+  const worktreeScopeKey = worktreeSessionScope ? worktreeState?.currentWorktreeKey ?? null : null;
+  const visibleSessions = useMemo(
+    () => (worktreeScopeKey
+      ? allSessions.filter((session) => session.worktreeKey === worktreeScopeKey)
+      : allSessions),
+    [allSessions, worktreeScopeKey],
+  );
+
+  const sessionFamilies = useMemo(() => listSessionFamilies(visibleSessions), [visibleSessions]);
   const familyByRootId = useMemo(
     () => new Map(sessionFamilies.map((family) => [family.root.id, family])),
     [sessionFamilies],
@@ -1348,6 +1378,23 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       unreadSessionIds,
     ),
     [allSessions, archiveIndex, runningSessionIds, unreadSessionIds],
+  );
+
+  // Per-worktree counts so the worktree switcher can point at the checkout
+  // that actually has unread or running sessions.
+  const worktreeActivity = useMemo(
+    () => getWorktreeActivity(allSessions, runningSessionIds, unreadSessionIds),
+    [allSessions, runningSessionIds, unreadSessionIds],
+  );
+
+  // Any activity in a project other than the one currently selected — shown as
+  // a dot on the (collapsed) selector button so it is visible without opening
+  // the dropdown.
+  const hasOtherWorkspaceActivity = useMemo(
+    () => [...projectActivity.entries()].some(
+      ([key, { running, unread }]) => key !== selectedProject?.key && (running > 0 || unread > 0),
+    ),
+    [projectActivity, selectedProject],
   );
 
   const showWorktreeSwitcher = Boolean(
@@ -1393,7 +1440,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     [groupExpansion, keptOpenGroups],
   );
   const model = useMemo(() => buildSessionTree({
-    sessions: allSessions,
+    sessions: visibleSessions,
     uiState,
     runningIds: runningSessionIds,
     awaitingIds: awaitingInputSessionIds,
@@ -1403,19 +1450,19 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     groupExpansion: shownGroupExpansion,
     moreShown,
     pinnedCollapsed,
-  }), [allSessions, uiState, runningSessionIds, awaitingInputSessionIds, unreadSessionIds, selectedSessionId, currentProject, shownGroupExpansion, moreShown, pinnedCollapsed]);
+  }), [visibleSessions, uiState, runningSessionIds, awaitingInputSessionIds, unreadSessionIds, selectedSessionId, currentProject, shownGroupExpansion, moreShown, pinnedCollapsed]);
   // Built while the archive view is rendered, its way out included: it
   // leaves as it was, not empty.
   const archiveMounted = archiveMotion.archiveMounted;
   const archiveRows = useMemo(() => (archiveMounted ? buildArchiveRows({
-    sessions: allSessions,
+    sessions: visibleSessions,
     uiState,
     runningIds: runningSessionIds,
     awaitingIds: awaitingInputSessionIds,
     unreadIds: unreadSessionIds,
     selectedSessionId,
     currentProject,
-  }) : []), [archiveMounted, allSessions, uiState, runningSessionIds, awaitingInputSessionIds, unreadSessionIds, selectedSessionId, currentProject]);
+  }) : []), [archiveMounted, visibleSessions, uiState, runningSessionIds, awaitingInputSessionIds, unreadSessionIds, selectedSessionId, currentProject]);
   const projectByKey = useMemo(
     () => new Map(model.projects.map((project) => [project.key, project])),
     [model.projects],

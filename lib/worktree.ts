@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync } from "fs";
 import { basename, dirname, join, resolve } from "path";
 import { promisify } from "util";
 import { allowFileRoot } from "./allowed-roots";
+import { projectIdentityKey } from "./project-identity";
 import { samePath, toNativePath } from "./paths";
 
 const execFileAsync = promisify(execFile);
@@ -27,12 +28,19 @@ export interface ProjectInfo {
    *  False for repo subdirectories and non-git dirs — the worktree switcher
    *  is only meaningful at the top level. */
   isTopLevel: boolean;
+  /** Canonical top-level path of the checkout (main checkout or linked
+   *  worktree) that contains cwd, or null for non-git dirs and removed
+   *  worktrees. Used to scope the session list to one worktree. */
+  worktreePath: string | null;
 }
 
 export interface WorktreeInfo {
   path: string;
   branch: string | null;
   isMain: boolean;
+  /** Stable, case/separator-insensitive identity for path, so callers can
+   *  match it against SessionInfo.worktreeKey without OS path semantics. */
+  key: string;
 }
 
 declare global {
@@ -114,7 +122,8 @@ export function inferRemovedWorktree(cwd: string): ProjectInfo | null {
   const isRepo = existsSync(join(repoRoot, ".git"))
     || ["HEAD", "objects", "refs"].every((name) => existsSync(join(repoRoot, name)));
   if (!isRepo) return null;
-  return { projectRoot: realPathOrSelf(repoRoot), branch: basename(cwd), isWorktree: true, isTopLevel: true };
+  // The worktree itself is gone, so it has no live checkout identity.
+  return { projectRoot: realPathOrSelf(repoRoot), branch: basename(cwd), isWorktree: true, isTopLevel: true, worktreePath: null };
 }
 
 /**
@@ -166,7 +175,9 @@ async function resolveProjectUncached(cwd: string): Promise<ProjectInfo> {
   let info: ProjectInfo;
   try {
     if (!existsSync(cwd)) {
-      return inferRemovedWorktree(cwd) ?? { projectRoot: cwd, branch: null, isWorktree: false, isTopLevel: false };
+      info = inferRemovedWorktree(cwd) ?? { projectRoot: cwd, branch: null, isWorktree: false, isTopLevel: false, worktreePath: null };
+      // The caller caches this result; a removed worktree is still an answer.
+      return info;
     }
     const out = await git(cwd, [
       "rev-parse", "--path-format=absolute",
@@ -194,9 +205,10 @@ async function resolveProjectUncached(cwd: string): Promise<ProjectInfo> {
       branch: ref && ref !== "HEAD" ? ref : null,
       isWorktree: isWorktreeTopLevel,
       isTopLevel,
+      worktreePath: realPathOrSelf(toplevel),
     };
   } catch {
-    info = { projectRoot: cwd, branch: null, isWorktree: false, isTopLevel: false };
+    info = { projectRoot: cwd, branch: null, isWorktree: false, isTopLevel: false, worktreePath: null };
   }
 
   return info;
@@ -231,6 +243,7 @@ export async function listWorktrees(cwd: string): Promise<WorktreeInfo[]> {
           path: current.path,
           branch: current.branch ?? null,
           isMain: worktrees.length === 0,
+          key: projectIdentityKey(current.path),
         });
       }
     }

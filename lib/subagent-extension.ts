@@ -69,6 +69,7 @@ export interface SubagentExtensionRuntime {
   start(request: StartSubagentRequest): Promise<SubagentExecution>;
   resume(request: ResumeSubagentRequest): Promise<SubagentExecution>;
   get(sessionId: string): Promise<SubagentRunInfo | null>;
+  acknowledge?(sessionId: string, parentToolCallId: string): Promise<void>;
   steer(sessionId: string, message: string): Promise<void>;
   notifyParent(run: SubagentRunInfo): Promise<void>;
 }
@@ -247,7 +248,7 @@ export function createSubagentExtension(
         async execute(_toolCallId, params, signal) {
           let run = await runtime.get(params.agent_id);
           if (!run) return { content: [{ type: "text", text: `Subagent not found: ${params.agent_id}` }], details: undefined, isError: true };
-          while (params.wait && (run.status === "starting" || run.status === "running")) {
+          while (params.wait && (run.status === "starting" || run.status === "queued" || run.status === "running")) {
             await new Promise<void>((resolve, reject) => {
               const onAbort = () => {
                 clearTimeout(timer);
@@ -262,6 +263,14 @@ export function createSubagentExtension(
             });
             run = await runtime.get(params.agent_id);
             if (!run) return { content: [{ type: "text", text: `Subagent not found: ${params.agent_id}` }], details: undefined, isError: true };
+          }
+          if (
+            run.status === "completed"
+            || run.status === "failed"
+            || run.status === "aborted"
+            || run.status === "interrupted"
+          ) {
+            await runtime.acknowledge?.(params.agent_id, run.parentToolCallId);
           }
           return {
             content: [{ type: "text", text: subagentFinalText(run) }],

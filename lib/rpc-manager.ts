@@ -549,15 +549,22 @@ export class AgentSessionWrapper {
     }
   }
 
+  async waitUntilIdle(): Promise<void> {
+    await this.inner.agent.waitForIdle?.();
+  }
+
   async sendCustomMessage(
     message: Parameters<AgentSessionLike["sendCustomMessage"]>[0],
     options?: NonNullable<Parameters<AgentSessionLike["sendCustomMessage"]>[1]>,
-  ): Promise<void> {
+    shouldSend: () => boolean = () => true,
+  ): Promise<boolean> {
     const releaseAdmission = await this.acquirePromptAdmission();
     try {
       if (!this._alive) throw new Error("Session is no longer available");
       this.resetIdleTimer();
+      if (!shouldSend()) return false;
       await this.inner.sendCustomMessage(message, options);
+      return true;
     } finally {
       releaseAdmission();
     }

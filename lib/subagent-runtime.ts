@@ -47,7 +47,9 @@ interface HostSession {
   sendCustomMessage(
     message: Parameters<AgentSessionLike["sendCustomMessage"]>[0],
     options?: NonNullable<Parameters<AgentSessionLike["sendCustomMessage"]>[1]>,
-  ): Promise<void>;
+    shouldSend?: () => boolean,
+  ): Promise<boolean>;
+  waitUntilIdle(): Promise<void>;
   isAlive(): boolean;
   isRunning(): boolean;
   waitUntilReady(): Promise<void>;
@@ -79,9 +81,15 @@ type StoredSubagentExecution = {
   cancelQueued?: () => boolean;
 };
 
+type SubagentNotificationState = {
+  acknowledged: boolean;
+  delivered: boolean;
+};
+
 declare global {
   var __piSubagentRuns: Map<string, StoredSubagentExecution> | undefined;
   var __piSubagentQueue: SubagentQueue<SubagentRunInfo> | undefined;
+  var __piSubagentNotificationStates: Map<string, SubagentNotificationState> | undefined;
 }
 const SUBAGENT_CONTEXT_LIMIT = 50_000;
 const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
@@ -94,6 +102,36 @@ function getSubagentRuns(): Map<string, StoredSubagentExecution> {
 function getSubagentQueue(): SubagentQueue<SubagentRunInfo> {
   if (!globalThis.__piSubagentQueue) globalThis.__piSubagentQueue = new SubagentQueue();
   return globalThis.__piSubagentQueue;
+}
+
+function getSubagentNotificationStates(): Map<string, SubagentNotificationState> {
+  if (!globalThis.__piSubagentNotificationStates) globalThis.__piSubagentNotificationStates = new Map();
+  return globalThis.__piSubagentNotificationStates;
+}
+
+function notificationKey(sessionId: string, parentToolCallId: string): string {
+  return `${sessionId}\u0000${parentToolCallId}`;
+}
+
+function trackSubagentNotification(run: Pick<SubagentRunInfo, "sessionId" | "parentToolCallId">): void {
+  getSubagentNotificationStates().set(notificationKey(run.sessionId, run.parentToolCallId), { acknowledged: false, delivered: false });
+}
+
+function acknowledgeSubagentResult(sessionId: string, parentToolCallId: string): void {
+  const state = getSubagentNotificationStates().get(notificationKey(sessionId, parentToolCallId));
+  if (state) state.acknowledged = true;
+}
+
+function claimSubagentNotification(sessionId: string, parentToolCallId: string): boolean {
+  const state = getSubagentNotificationStates().get(notificationKey(sessionId, parentToolCallId));
+  if (!state) return true;
+  if (state.acknowledged || state.delivered) return false;
+  state.delivered = true;
+  return true;
+}
+
+function finishSubagentNotification(sessionId: string, parentToolCallId: string): void {
+  getSubagentNotificationStates().delete(notificationKey(sessionId, parentToolCallId));
 }
 
 function parseSubagentModel(runtime: ModelRuntime, value: string | undefined) {
@@ -275,6 +313,7 @@ export function createSubagentController(
         createdAt,
         ...(isolatedWorktree ? { worktreePath: isolatedWorktree.path, worktreeBranch: isolatedWorktree.branch } : {}),
       };
+      if (runInBackground) trackSubagentNotification(initialRun);
 
       let turnCount = 0;
       let maxTurnsReached = false;
@@ -451,6 +490,7 @@ export function createSubagentController(
       result: undefined,
       error: undefined,
     };
+    if (runInBackground) trackSubagentNotification(initialRun);
     const manager = wrapper.inner.sessionManager;
     let resolveCompletion!: (run: SubagentRunInfo) => void;
     const completion = new Promise<SubagentRunInfo>((resolve) => { resolveCompletion = resolve; });
@@ -545,6 +585,10 @@ export function createSubagentController(
     return readSubagentRun(manager.getEntries() as unknown as SessionEntry[], sessionId, sessionPath);
   }
 
+  async function acknowledge(sessionId: string, parentToolCallId: string): Promise<void> {
+    acknowledgeSubagentResult(sessionId, parentToolCallId);
+  }
+
   async function steer(sessionId: string, message: string): Promise<void> {
     const wrapper = dependencies.getSession(sessionId);
     if (!wrapper?.isAlive() || !wrapper.isRunning()) throw new Error("Subagent is not running");
@@ -553,6 +597,12 @@ export function createSubagentController(
   }
 
   async function notifyParent(run: SubagentRunInfo): Promise<void> {
+    const notificationKeyForRun = notificationKey(run.sessionId, run.parentToolCallId);
+    if (getSubagentNotificationStates().get(notificationKeyForRun)?.acknowledged) {
+      finishSubagentNotification(run.sessionId, run.parentToolCallId);
+      return;
+    }
+
     let parent = dependencies.getSession(run.parentSessionId);
     if (!parent?.isAlive()) {
       const sessionFile = await dependencies.resolveSessionPath(run.parentSessionId);
@@ -560,13 +610,19 @@ export function createSubagentController(
       parent = await dependencies.reopenSession(run.parentSessionId, sessionFile);
     }
     await parent.waitUntilReady();
+    await parent.waitUntilIdle();
     if (!parent.isAlive()) throw new Error(`Parent session is no longer available: ${run.parentSessionId}`);
-    await parent.sendCustomMessage({
-      customType: "pi-web:subagent-notification",
-      content: subagentNotificationText(run),
-      display: true,
-      details: subagentToolDetails(run),
-    }, { deliverAs: "followUp", triggerTurn: true });
+
+    try {
+      await parent.sendCustomMessage({
+        customType: "pi-web:subagent-notification",
+        content: subagentNotificationText(run),
+        display: true,
+        details: subagentToolDetails(run),
+      }, { deliverAs: "followUp", triggerTurn: true }, () => claimSubagentNotification(run.sessionId, run.parentToolCallId));
+    } finally {
+      finishSubagentNotification(run.sessionId, run.parentToolCallId);
+    }
   }
 
   async function abort(sessionId: string): Promise<void> {
@@ -583,7 +639,7 @@ export function createSubagentController(
   }
 
   return {
-    extensionRuntime: { start, resume, get, steer, notifyParent },
+    extensionRuntime: { start, resume, get, acknowledge, steer, notifyParent },
     get,
     steer,
     abort,

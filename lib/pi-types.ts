@@ -147,6 +147,7 @@ export interface AgentSessionLike {
       thinkingLevel?: string;
       streamingMessage?: PiAgentMessage;
     };
+    waitForIdle?: () => Promise<void>;
     prepareNextTurnWithContext?: (
       context: PrepareNextTurnContext,
       signal?: AbortSignal,

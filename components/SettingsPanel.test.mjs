@@ -41,9 +41,10 @@ test("lists the Experimental tab last and moves PlantUML into it", async () => {
   );
   assert.match(tabsBlock, /\{ id: "experimental", label: t\("settings\.experimental"\), requiresProject: false \},/);
   assert.ok(tabsBlock.indexOf('id: "experimental"') > tabsBlock.indexOf('id: "plugins"'), "Experimental must be the last tab");
-  assert.match(panelSource, /sectionHost\("experimental", <ExperimentalSettings \/>\)/);
+  assert.match(panelSource, /sectionHost\("experimental", <ExperimentalSettings cwd=\{cwd\} \/>\)/);
   assert.doesNotMatch(panelSource, /<PlantUmlSettings \/>/);
   assert.match(experimentalSource, /<PlantUmlSettings \/>/);
+  assert.match(experimentalSource, /<SessionTitleSettings cwd=\{cwd\} \/>/);
   assert.match(experimentalSource, /t\("settings\.onlyCurrentWorktree"\)/);
   assert.match(experimentalSource, /setWorktreeSessionScopeEnabled\(enabled\)/);
 });

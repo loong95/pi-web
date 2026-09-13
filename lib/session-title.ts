@@ -3,8 +3,11 @@ import {
   type AgentMessage,
   type AgentOptions,
   type AgentTool,
+  type ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
+import { clampThinkingLevel, type Api, type Model } from "@earendil-works/pi-ai";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { SessionTitleModelRef } from "./session-title-model";
 
 const TITLE_TIMEOUT_MS = 90_000;
 const MAX_TITLE_LENGTH = 80;
@@ -20,6 +23,10 @@ Requirements:
 
 export interface GeneratedSessionTitle {
   title: string;
+  /** Model that produced the title. */
+  model: { provider: string; modelId: string };
+  /** Set when a configured title model was unusable and the session model ran instead. */
+  modelFallback?: { requested: SessionTitleModelRef };
   usage?: {
     input: number;
     output: number;
@@ -27,6 +34,28 @@ export interface GeneratedSessionTitle {
     cacheWrite: number;
     total: number;
   };
+}
+
+/**
+ * Why automatic naming did not run. Automatic naming only ever names a session
+ * once, right after its first prompt, and never overwrites a name the user set.
+ */
+export type SessionTitleSkipReason =
+  | "disabled"
+  | "already-named"
+  | "no-user-message"
+  | "not-first-message";
+
+export function resolveAutoTitleSkipReason(input: {
+  enabled: boolean;
+  sessionName?: string | null;
+  userMessages: number;
+}): SessionTitleSkipReason | null {
+  if (!input.enabled) return "disabled";
+  if (input.sessionName?.trim()) return "already-named";
+  if (input.userMessages < 1) return "no-user-message";
+  if (input.userMessages > 1) return "not-first-message";
+  return null;
 }
 
 function createShadowTools(tools: AgentTool[]): AgentTool[] {
@@ -42,14 +71,21 @@ function createShadowTools(tools: AgentTool[]): AgentTool[] {
  * Build a temporary Agent configuration whose provider-facing prefix matches
  * the source Agent. Tool implementations are replaced without changing their
  * names, descriptions, or schemas, so a naming run cannot mutate the project.
+ *
+ * Overrides exist for a configured title model: with one the request no longer
+ * shares the source model's cache prefix, but it still sends the same system
+ * prompt, tools, and messages.
  */
-export function buildSessionTitleAgentOptions(source: Agent): AgentOptions {
+export function buildSessionTitleAgentOptions(
+  source: Agent,
+  overrides: SessionTitleAgentOverrides = {},
+): AgentOptions {
   const state = source.state;
   return {
     initialState: {
       systemPrompt: state.systemPrompt,
-      model: state.model,
-      thinkingLevel: state.thinkingLevel,
+      model: overrides.model ?? state.model,
+      thinkingLevel: overrides.thinkingLevel ?? state.thinkingLevel,
       tools: createShadowTools(state.tools),
       messages: state.messages,
     },
@@ -135,7 +171,40 @@ export function parseGeneratedSessionTitle(raw: string): string {
   return value;
 }
 
-function getAssistantResult(agent: Agent, historyLength: number): GeneratedSessionTitle {
+interface TitleModelRuntime {
+  getModel?: (provider: string, modelId: string) => Model<Api> | undefined;
+  refresh?: (options?: { allowNetwork?: boolean }) => Promise<unknown>;
+  hasConfiguredAuth?: (provider: string) => boolean;
+}
+
+/**
+ * Resolve a configured title model through the source session's runtime, which
+ * already knows pi's model catalog and credentials.
+ *
+ * Best effort by design: a stale id or a provider whose credentials were removed
+ * makes the caller fall back to the session's own model. A misconfigured title
+ * model must never make the manual button fail, let alone the chat.
+ */
+async function resolveTitleModel(source: AgentSession, ref: SessionTitleModelRef): Promise<Model<Api> | undefined> {
+  const runtime = (source as unknown as { modelRuntime?: TitleModelRuntime }).modelRuntime;
+  if (!runtime?.getModel) return undefined;
+
+  let model = runtime.getModel(ref.provider, ref.modelId);
+  if (!model && runtime.refresh) {
+    await runtime.refresh({ allowNetwork: false }).catch(() => {});
+    model = runtime.getModel(ref.provider, ref.modelId);
+  }
+  if (!model) return undefined;
+  if (runtime.hasConfiguredAuth && !runtime.hasConfiguredAuth(ref.provider)) return undefined;
+  return model;
+}
+
+function getAssistantResult(
+  agent: Agent,
+  historyLength: number,
+  titleModel: { provider: string; id: string },
+  fallback: GeneratedSessionTitle["modelFallback"],
+): GeneratedSessionTitle {
   const generatedMessages = agent.state.messages.slice(historyLength);
   for (let i = generatedMessages.length - 1; i >= 0; i--) {
     const message = generatedMessages[i];
@@ -151,6 +220,8 @@ function getAssistantResult(agent: Agent, historyLength: number): GeneratedSessi
     if (!text) continue;
     return {
       title: parseGeneratedSessionTitle(text),
+      model: { provider: titleModel.provider, modelId: titleModel.id },
+      ...(fallback ? { modelFallback: fallback } : {}),
       ...(message.usage ? {
         usage: {
           input: message.usage.input,
@@ -208,9 +279,26 @@ export function sanitizeTitleMessages(messages: AgentMessage[]): AgentMessage[] 
   return sanitized;
 }
 
-export async function generateSessionTitle(source: AgentSession): Promise<GeneratedSessionTitle> {
+export interface SessionTitleOptions {
+  /** Generate the title with this model instead of the model the session is using. */
+  model?: SessionTitleModelRef;
+}
+
+export interface SessionTitleAgentOverrides {
+  model?: Model<Api>;
+  thinkingLevel?: ThinkingLevel;
+}
+
+export async function generateSessionTitle(
+  source: AgentSession,
+  options: SessionTitleOptions = {},
+): Promise<GeneratedSessionTitle> {
   const sourceAgent = source.agent;
   await sourceAgent.waitForIdle();
+
+  const requestedModel = options.model;
+  const targetModel = requestedModel ? await resolveTitleModel(source, requestedModel) : undefined;
+  const modelFallback = requestedModel && !targetModel ? { requested: requestedModel } : undefined;
 
   const sanitizedMessages = sanitizeTitleMessages(sourceAgent.state.messages);
   const historyLength = sanitizedMessages.length;
@@ -220,14 +308,21 @@ export async function generateSessionTitle(source: AgentSession): Promise<Genera
     throw new Error("The session has no user messages to name");
   }
 
-  const options = buildSessionTitleAgentOptions(sourceAgent);
-  options.initialState!.messages = sanitizedMessages;
+  const titleOptions = buildSessionTitleAgentOptions(
+    sourceAgent,
+    targetModel
+      // A title is a short extraction task, so an override never inherits the
+      // session's thinking level: use the target model's cheapest level.
+      ? { model: targetModel, thinkingLevel: clampThinkingLevel(targetModel, "off") }
+      : {},
+  );
+  titleOptions.initialState!.messages = sanitizedMessages;
   const continuesFromTrailingUser = sanitizedMessages.at(-1)?.role === "user";
   if (continuesFromTrailingUser) {
-    options.initialState!.messages = appendTitleRequestToTrailingUser(sanitizedMessages);
+    titleOptions.initialState!.messages = appendTitleRequestToTrailingUser(sanitizedMessages);
   }
 
-  const temporaryAgent = new Agent(options);
+  const temporaryAgent = new Agent(titleOptions);
   const runPromise = continuesFromTrailingUser
     ? temporaryAgent.continue()
     : temporaryAgent.prompt(TITLE_PROMPT);
@@ -251,5 +346,7 @@ export async function generateSessionTitle(source: AgentSession): Promise<Genera
     if (timeout) clearTimeout(timeout);
   }
 
-  return getAssistantResult(temporaryAgent, historyLength);
+  // The temporary agent's own state is the authority on which model ran: it
+  // holds the override after resolution and cannot be undefined on this path.
+  return getAssistantResult(temporaryAgent, historyLength, temporaryAgent.state.model, modelFallback);
 }

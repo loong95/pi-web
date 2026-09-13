@@ -7,9 +7,10 @@ import {
   setWorktreeSessionScopeEnabled,
 } from "@/lib/worktree-session-scope";
 import { PlantUmlSettings } from "./PlantUmlSettings";
+import { SessionTitleSettings } from "./SessionTitleSettings";
 import { ConfigSwitch } from "./SettingsUi";
 
-export function ExperimentalSettings() {
+export function ExperimentalSettings({ cwd = null }: { cwd?: string | null }) {
   const { t } = useI18n();
   const [worktreeSessionScope, setWorktreeSessionScope] = useState(false);
 
@@ -37,6 +38,8 @@ export function ExperimentalSettings() {
           />
         </div>
       </section>
+
+      <SessionTitleSettings cwd={cwd} />
 
       <PlantUmlSettings />
     </div>

@@ -49,6 +49,7 @@ Browser                Next.js Server              AgentSession (in-process)
 app/api/
   sessions/route.ts               GET  list all sessions
   sessions/[id]/route.ts          GET/PATCH/DELETE session
+  sessions/[id]/auto-name/route.ts POST generate a session title (`{ trigger: "auto" }` for the experimental background trigger)
   sessions/[id]/context/route.ts  GET ?leafId= — context for a specific leaf
   sessions/[id]/export/route.ts   GET exported HTML for a session
   agent/new/route.ts              POST { cwd, message, toolNames?, provider?, modelId? }
@@ -72,6 +73,7 @@ app/api/
   skills/route.ts                 GET/PATCH loaded skills and disable-model-invocation
   skills/install/route.ts         POST install skills through npx skills add
   skills/search/route.ts          GET/POST skills.sh search
+  session-title/settings/route.ts GET/PUT experimental auto-title toggle and title model
   subagents/settings/route.ts     GET/PUT built-in subagent feature setting
   worktrees/route.ts              GET/POST/DELETE git worktrees
 
@@ -85,6 +87,9 @@ lib/
   pi-types.ts          local structural types for pi SDK objects
   rpc-manager.ts      AgentSessionWrapper + registry + startRpcSession
   session-reader.ts   SessionManager wrappers + path cache + buildSessionContext adapter
+  session-title.ts    ephemeral shadow Agent that turns the session into a title
+  session-title-model.ts  shared `{ provider, modelId }` title-model ref + parser
+  session-title-settings.ts  read/write ~/.pi/agent/session-title.json
   subagent-settings.ts  read/write ~/.pi/agent/agents/settings.json
   tool-presets.ts     PRESET_NONE/READ_ONLY/DEFAULT/FULL + getPresetFromTools()
   tool-preset-preference.ts  browser-persisted default for fresh sessions
@@ -105,6 +110,7 @@ components/
   AgentsConfig.tsx    built-in subagent toggle + agent profile editor
   PluginsConfig.tsx   modal for installed package plugins
   SkillsConfig.tsx    modal for loaded/search/installable skills
+  SessionTitleSettings.tsx  auto-title toggle + title model (Experimental tab)
   FileExplorer.tsx    file tree inside sidebar
   FileIcons.tsx       file icon helpers
   FileViewer.tsx      file content in a tab
@@ -152,6 +158,14 @@ The last preset explicitly selected by the user is stored in browser `localStora
 
 ### `enabledModels` scoping
 The `enabledModels` setting uses pi's `--models` syntax: minimatch globs against `provider/modelId` or a bare `modelId`, fuzzy matching for non-glob patterns, and an optional `:thinkingLevel` suffix. Never compare those patterns as literal strings — `lib/model-scope.ts` delegates to the SDK's `resolveModelScopeWithDiagnostics()` so pi-web and the TUI agree on the visible model list, and falls back to all available models when patterns resolve to nothing. `startRpcSession()` resolves that scope before creating an AgentSession and passes the selected initial model, thinking pin, and SDK-native `scopedModels` atomically; `GET /api/models` reuses the helper only for selector data, `thinkingLevelPins`, and `modelScopeWarnings` display.
+
+### Auto session title (experimental)
+- Settings live in `~/.pi/agent/session-title.json` (`autoEnabled`, `model`) and are read through `lib/session-title-settings.ts`. A damaged file reads as disabled, never as an error. `lib/session-title-model.ts` holds the shared `{ provider, modelId }` type and parser for both the server and the settings UI.
+- `POST /api/sessions/[id]/auto-name` is the single entry point for both the title-bar button and the background trigger. The route reads the settings *before* resolving the session, so a disabled feature never starts an AgentSession.
+- The browser only knows that a prompt settled: after `onAgentEnd` it posts `{ trigger: "auto" }` once per session. The **session** decides eligibility (`lib/session-title.ts#resolveAutoTitleSkipReason`): unnamed, exactly one user message. Skipped requests answer `200 { skipped }`; the client swallows every failure, so background naming can never surface as a chat error.
+- The configured title model is resolved at use time through the live session's `ModelRuntime`. Resolution is best effort: an unusable id, or a provider whose credentials are gone, falls back to the session's own model (reported as `modelFallback` in the response) instead of failing the naming run or the manual button. The override is clamped to the target model's cheapest thinking level.
+- Naming runs through a temporary `Agent` built from the source session (same system prompt, tools, messages; tools shadowed to throw), so titles share the session's provider cache prefix when the model matches and can never mutate the project.
+- See `docs/adr/0004-auto-session-title.md` for the persistence, trigger-ownership, and failure-isolation rationale.
 
 ### SSE reconnect on page refresh mid-stream
 On `ChatWindow` mount, `GET /api/agent/[id]` is called. If `state.isStreaming === true`, SSE is reconnected automatically. `thinkingLevel` and `isCompacting` are also synced from this response.

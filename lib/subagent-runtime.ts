@@ -118,13 +118,18 @@ function trackSubagentNotification(run: Pick<SubagentRunInfo, "sessionId" | "par
 }
 
 function acknowledgeSubagentResult(sessionId: string, parentToolCallId: string): void {
-  const state = getSubagentNotificationStates().get(notificationKey(sessionId, parentToolCallId));
+  const states = getSubagentNotificationStates();
+  const key = notificationKey(sessionId, parentToolCallId);
+  const state = states.get(key);
   if (state) state.acknowledged = true;
+  else states.set(key, { acknowledged: true, delivered: false });
 }
 
 function claimSubagentNotification(sessionId: string, parentToolCallId: string): boolean {
-  const state = getSubagentNotificationStates().get(notificationKey(sessionId, parentToolCallId));
-  if (!state) return true;
+  const states = getSubagentNotificationStates();
+  const key = notificationKey(sessionId, parentToolCallId);
+  const state = states.get(key) ?? { acknowledged: false, delivered: false };
+  states.set(key, state);
   if (state.acknowledged || state.delivered) return false;
   state.delivered = true;
   return true;

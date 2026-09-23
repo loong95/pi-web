@@ -163,6 +163,12 @@ package-lock.json
 
 判断原则：上游实现了同一能力时整块交给上游；本分支特有的部分（如自动命名触发与设置、标题模型选择）保留，但要改用上游的重构后接口，而不是把旧实现一起带回来。
 
+反向的情况同样要记录：**上游没有对应实现的改动不要顺手删掉**。目前只有一条：
+
+| 本分支保有的改动 | 上游现状 | 说明 |
+| --- | --- | --- |
+| `get_subagent_result` 对 `queued` 状态的等待与文本（`UNFINISHED_SUBAGENT_STATUSES`） | `get_subagent_result` 只把 `starting`/`running` 当未结束，`subagentFinalText()` 对 `queued` 落到 `failed: Unknown error` 分支 | 排队中的 run 会被报成失败，且 `wait: true` 不退让。上游修掉后按上面的原则交还给上游 |
+
 ## PlantUML 特有说明
 
 PlantUML Server URL 存储在用户目录的 `~/.pi/agent/plantuml.json`，不属于仓库内容，不应提交。每次有较大上游更新（特别是 Next.js、React、Markdown 或 Settings 相关更新）后，按 [PlantUML 验收指南](./plantuml-acceptance.md) 用自托管 PlantUML Server 做一次冒烟验证。

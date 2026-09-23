@@ -34,7 +34,6 @@ import { SkillsConfig } from "./SkillsConfig";
 import { AgentsConfig } from "./AgentsConfig";
 import { PluginsConfig } from "./PluginsConfig";
 import { McpConfig } from "./McpConfig";
-import { PlantUmlSettings } from "./PlantUmlSettings";
 import { ExperimentalSettings } from "./ExperimentalSettings";
 import { ConfigButton, ConfigSwitch } from "./SettingsUi";
 import { FontSettings } from "./FontSettings";

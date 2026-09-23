@@ -47,7 +47,7 @@ app/api/
   sessions/stats/route.ts          POST { ids } each session's tokens, cost, tool calls, active time (the agent switcher's rows)
   sessions/[id]/state/route.ts     GET live wrapper state while running
   sessions/ui-state/route.ts       GET/POST sidebar pins, archive, project order and names (set, restore, pin-project, add-projects, move-project, rename-project)
-  sessions/[id]/auto-name/route.ts POST generate a session title
+  sessions/[id]/auto-name/route.ts POST generate a session title (`{ trigger: "auto" }` for the background trigger)
   sessions/search/route.ts         GET session search
   agent/new/route.ts               POST { cwd, type: prompt|ensure_session (start only), message?, toolNames?, provider?, modelId?, thinkingLevel? }
   agent/[id]/route.ts              GET state (?systemPrompt=0: without the prompt) | POST any command
@@ -130,6 +130,9 @@ lib/
   enabled-models.ts         pure minimal-edit engine for the enabledModels pattern list
   enabled-models-runtime.ts SDK adapter for enabledModels: pattern resolution, provider kinds, settings IO
   model-context.ts          client-safe: managed models' contextWindow overrides in the models.json draft, the Save check
+  session-title.ts          ephemeral shadow Agent that turns the session into a title
+  session-title-model.ts    shared `{ provider, modelId }` title-model ref + parser
+  session-title-settings.ts read/write ~/.pi/agent/session-title.json
   subagent-settings.ts      read/write ~/.pi/agent/agents/settings.json
   file-access.ts            allowed file roots for /api/files and worktrees
   file-upload-client.ts     browser upload to /api/files ?type=upload, shared by the explorer and chat drops
@@ -210,6 +213,7 @@ components/
   SubagentViewer.tsx       read-only right-panel tab of a subagent's transcript (polls the context route)
   PluginsConfig.tsx        Settings › Plugins: installed package plugins
   SkillsConfig.tsx         Settings › Skills: loaded, search, install
+  SessionTitleSettings.tsx auto-title toggle + title model (Experimental tab)
   McpConfig.tsx            Settings › MCP: servers, switches, exposure, remove/undo, Test, sign-in, Code mode, trust
   mcp-config-helpers.ts    pure helpers and requests for McpConfig
   McpSignIn.tsx            a server's Sign-in row in Settings › MCP

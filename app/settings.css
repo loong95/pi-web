@@ -1607,6 +1607,24 @@
 
 /* Fifteen columns: System spans the first row; then five light themes and five dark ones
    (three columns each), and a row of three wide tiles (five columns each). */
+.settings-session-title-model {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  max-width: 420px;
+  margin-top: 12px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.settings-session-title-model-label {
+  color: var(--text-muted);
+}
+
+.settings-session-title-model .settings-general-description {
+  margin: 0;
+}
+
 .settings-plantuml-controls {
   display: grid;
   gap: 8px;

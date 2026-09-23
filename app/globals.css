@@ -832,13 +832,15 @@ pre, code {
   border-collapse: separate;
   border-spacing: 0;
   min-width: 100%;
+  width: 100%;
   font-size: calc(13px + var(--chat-font-size-offset, 0px));
 }
-.markdown-table-wrap > table { width: max-content; }
 .markdown-body th, .markdown-body td {
   border: 0;
   border-bottom: 1px solid var(--border);
+  min-width: 8ch;
   padding: 6px 10px;
+  overflow-wrap: anywhere;
   text-align: left;
   vertical-align: top;
 }

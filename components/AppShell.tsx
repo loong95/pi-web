@@ -298,6 +298,9 @@ export function AppShell() {
   const [sessionStats, setSessionStats] = useState<SessionStatsInfo | null>(null);
   const [autoNameStatus, setAutoNameStatus] = useState<AutoNameStatus>({ kind: "idle" });
   const autoNameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Sessions this browser already asked to name in the background. The server
+  // still decides whether a session is eligible; this only prevents repeats.
+  const autoTitleRequestedRef = useRef<Set<string>>(new Set());
   const activeSessionIdRef = useRef<string | null>(selectedSession?.id ?? null);
   activeSessionIdRef.current = selectedSession?.id ?? null;
   const handleSessionStatsChange = useCallback((stats: SessionStatsInfo | null) => {
@@ -902,12 +905,48 @@ export function AppShell() {
     }
   }, [handleSelectSession, locale]);
 
+  // Manual and automatic naming share one optimistic update: refresh the list,
+  // then merge the title into the selected session and the stats panel.
+  const applyGeneratedTitle = useCallback((sessionId: string, title: string) => {
+    setRefreshKey((key) => key + 1);
+    if (activeSessionIdRef.current !== sessionId) return;
+    setSelectedSession((current) => current?.id === sessionId ? { ...current, name: title } : current);
+    setSessionStats((current) => current?.sessionId === sessionId ? { ...current, sessionName: title } : current);
+  }, []);
+
+  /**
+   * Experimental auto naming: fire once per session after its first prompt
+   * settles. The server owns the decision (feature flag, first message, existing
+   * name), and every failure is swallowed here so background naming can never
+   * disturb the chat or the session list.
+   */
+  const requestAutoTitle = useCallback((session: SessionInfo) => {
+    if (autoTitleRequestedRef.current.has(session.id)) return;
+    autoTitleRequestedRef.current.add(session.id);
+    void (async () => {
+      try {
+        const response = await fetch(`/api/sessions/${encodeURIComponent(session.id)}/auto-name`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ trigger: "auto" }),
+        });
+        if (!response.ok) return;
+        const body = (await response.json().catch(() => ({}))) as { title?: unknown };
+        if (typeof body.title !== "string" || !body.title.trim()) return;
+        applyGeneratedTitle(session.id, body.title.trim());
+      } catch {
+        // Ignore: automatic naming must never surface as a chat error.
+      }
+    })();
+  }, [applyGeneratedTitle]);
+
   const handleAgentEnd = useCallback(() => {
     setRefreshKey((k) => k + 1);
     setExplorerRefreshKey((k) => k + 1);
     if (selectedSession) hydrateSelectedSession(selectedSession.id);
 
     if (selectedSession?.relation?.kind === "subagent") return;
+    if (selectedSession && !selectedSession.name) requestAutoTitle(selectedSession);
     if (!shouldShowBrowserNotification()) return;
     const targetSession = selectedSession;
     deliverSessionNotification({
@@ -916,7 +955,7 @@ export function AppShell() {
       body: translate("i18n.taskFinished"),
       tag: targetSession ? `pi-session-complete:${targetSession.id}` : "pi-session-complete",
     });
-  }, [deliverSessionNotification, hydrateSelectedSession, selectedSession, translate]);
+  }, [deliverSessionNotification, hydrateSelectedSession, requestAutoTitle, selectedSession, translate]);
 
   const handleAttentionNeeded = useCallback((request: BlockingExtensionUiRequest) => {
     if (selectedSession?.relation?.kind === "subagent") return;
@@ -939,6 +978,8 @@ export function AppShell() {
     if (autoNameTimerRef.current) clearTimeout(autoNameTimerRef.current);
     setActiveTopPanel(null);
     setAutoNameStatus({ kind: "naming" });
+    // An explicit request also satisfies the background trigger for this session.
+    autoTitleRequestedRef.current.add(sessionId);
 
     try {
       const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/auto-name`, {
@@ -950,10 +991,8 @@ export function AppShell() {
       }
 
       const title = body.title.trim();
-      setRefreshKey((key) => key + 1);
+      applyGeneratedTitle(sessionId, title);
       if (activeSessionIdRef.current !== sessionId) return;
-      setSelectedSession((current) => current?.id === sessionId ? { ...current, name: title } : current);
-      setSessionStats((current) => current?.sessionId === sessionId ? { ...current, sessionName: title } : current);
       setAutoNameStatus({ kind: "success" });
       autoNameTimerRef.current = setTimeout(() => setAutoNameStatus({ kind: "idle" }), 1800);
     } catch (error) {
@@ -962,7 +1001,7 @@ export function AppShell() {
       setAutoNameStatus({ kind: "error", message });
       autoNameTimerRef.current = setTimeout(() => setAutoNameStatus({ kind: "idle" }), 5000);
     }
-  }, [autoNameStatus.kind, selectedSession?.id]);
+  }, [applyGeneratedTitle, autoNameStatus.kind, selectedSession?.id]);
 
   useEffect(() => {
     if (autoNameTimerRef.current) clearTimeout(autoNameTimerRef.current);

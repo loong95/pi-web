@@ -10,6 +10,7 @@ import {
   type SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { SessionTitleModelRef } from "./session-title-model";
 
 const TITLE_TIMEOUT_MS = 90_000;
 const TITLE_MAX_TOKENS = 256;
@@ -49,6 +50,10 @@ Requirements:
 
 export interface GeneratedSessionTitle {
   title: string;
+  /** Model that produced the title. */
+  model: { provider: string; modelId: string };
+  /** Set when a configured title model was unusable and the session model ran instead. */
+  modelFallback?: { requested: SessionTitleModelRef };
   usage?: {
     input: number;
     output: number;
@@ -56,6 +61,28 @@ export interface GeneratedSessionTitle {
     cacheWrite: number;
     total: number;
   };
+}
+
+/**
+ * Why automatic naming did not run. Automatic naming only ever names a session
+ * once, right after its first prompt, and never overwrites a name the user set.
+ */
+export type SessionTitleSkipReason =
+  | "disabled"
+  | "already-named"
+  | "no-user-message"
+  | "not-first-message";
+
+export function resolveAutoTitleSkipReason(input: {
+  enabled: boolean;
+  sessionName?: string | null;
+  userMessages: number;
+}): SessionTitleSkipReason | null {
+  if (!input.enabled) return "disabled";
+  if (input.sessionName?.trim()) return "already-named";
+  if (input.userMessages < 1) return "no-user-message";
+  if (input.userMessages > 1) return "not-first-message";
+  return null;
 }
 
 export interface TitleRequest {
@@ -84,9 +111,13 @@ export function resolveTitleThinkingLevel(model: Model<Api>): ThinkingLevel {
  * summarization path: a short system prompt, one user turn, no tools, a fresh
  * session id, and cacheRetention "none". The request is too small and too
  * unique to reuse the live session's prefix or write a cache nobody will read.
+ *
+ * `overrideModel` is the configured title model; the request stopped reusing
+ * the session's cache prefix, so naming with a different model costs nothing
+ * extra.
  */
-export function buildTitleRequest(source: Agent, transcript: string): TitleRequest {
-  const model = source.state.model;
+export function buildTitleRequest(source: Agent, transcript: string, overrideModel?: Model<Api>): TitleRequest {
+  const model = overrideModel ?? source.state.model;
   const thinkingLevel = resolveTitleThinkingLevel(model);
   return {
     model,
@@ -251,7 +282,39 @@ export function parseGeneratedSessionTitle(raw: string): string {
   return value;
 }
 
-function titleFromAssistant(message: AssistantMessage): GeneratedSessionTitle {
+interface TitleModelRuntime {
+  getModel?: (provider: string, modelId: string) => Model<Api> | undefined;
+  refresh?: (options?: { allowNetwork?: boolean }) => Promise<unknown>;
+  hasConfiguredAuth?: (provider: string) => boolean;
+}
+
+/**
+ * Resolve a configured title model through the source session's runtime, which
+ * already knows pi's model catalog and credentials.
+ *
+ * Best effort by design: a stale id or a provider whose credentials were removed
+ * makes the caller fall back to the session's own model. A misconfigured title
+ * model must never make the manual button fail, let alone the chat.
+ */
+async function resolveTitleModel(source: AgentSession, ref: SessionTitleModelRef): Promise<Model<Api> | undefined> {
+  const runtime = (source as unknown as { modelRuntime?: TitleModelRuntime }).modelRuntime;
+  if (!runtime?.getModel) return undefined;
+
+  let model = runtime.getModel(ref.provider, ref.modelId);
+  if (!model && runtime.refresh) {
+    await runtime.refresh({ allowNetwork: false }).catch(() => {});
+    model = runtime.getModel(ref.provider, ref.modelId);
+  }
+  if (!model) return undefined;
+  if (runtime.hasConfiguredAuth && !runtime.hasConfiguredAuth(ref.provider)) return undefined;
+  return model;
+}
+
+function titleFromAssistant(
+  message: AssistantMessage,
+  model: Model<Api>,
+  fallback?: GeneratedSessionTitle["modelFallback"],
+): GeneratedSessionTitle {
   if (message.stopReason === "error") {
     throw new Error(message.errorMessage || "The title model request failed");
   }
@@ -266,6 +329,8 @@ function titleFromAssistant(message: AssistantMessage): GeneratedSessionTitle {
   if (!text) throw new Error("The model did not return a session title");
   return {
     title: parseGeneratedSessionTitle(text),
+    model: { provider: model.provider, modelId: model.id },
+    ...(fallback ? { modelFallback: fallback } : {}),
     ...(message.usage ? {
       usage: {
         input: message.usage.input,
@@ -278,7 +343,15 @@ function titleFromAssistant(message: AssistantMessage): GeneratedSessionTitle {
   };
 }
 
-export async function generateSessionTitle(source: AgentSession): Promise<GeneratedSessionTitle> {
+export interface SessionTitleOptions {
+  /** Generate the title with this model instead of the model the session is using. */
+  model?: SessionTitleModelRef;
+}
+
+export async function generateSessionTitle(
+  source: AgentSession,
+  titleOptions: SessionTitleOptions = {},
+): Promise<GeneratedSessionTitle> {
   const sourceAgent = source.agent;
   // Snapshot whatever the session holds right now. The transcript is plain
   // text the model reads once, so a turn still in flight only means the
@@ -288,7 +361,11 @@ export async function generateSessionTitle(source: AgentSession): Promise<Genera
     throw new Error("The session has no usable text to name");
   }
 
-  const { model, context, options } = buildTitleRequest(sourceAgent, transcript);
+  const requestedModel = titleOptions.model;
+  const targetModel = requestedModel ? await resolveTitleModel(source, requestedModel) : undefined;
+  const modelFallback = requestedModel && !targetModel ? { requested: requestedModel } : undefined;
+
+  const { model, context, options } = buildTitleRequest(sourceAgent, transcript, targetModel);
   const apiKey = await sourceAgent.getApiKey?.(model.provider);
   const controller = new AbortController();
   const requestOptions: SimpleStreamOptions = {
@@ -302,7 +379,7 @@ export async function generateSessionTitle(source: AgentSession): Promise<Genera
   try {
     // Providers read the prompt from the transcript's leading system message.
     const stream = await sourceAgent.streamFunction(model, normalizeContext(context), requestOptions);
-    return titleFromAssistant(await stream.result());
+    return titleFromAssistant(await stream.result(), model, modelFallback);
   } catch (error) {
     if (controller.signal.aborted) {
       throw new Error("Session title generation timed out");

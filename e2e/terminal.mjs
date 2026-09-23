@@ -99,6 +99,21 @@ try {
       const [id] = created;
       assert.equal(created.size, 1);
 
+      // An IME composition started in front of an existing character must send the composed
+      // characters, not the text that already followed the caret in xterm's helper textarea (#5456).
+      await page.locator(".terminal-panel:visible .xterm-helper-textarea").focus();
+      await page.keyboard.type("echo abc");
+      await page.keyboard.press("ArrowLeft");
+      await page.keyboard.press("ArrowLeft");
+      const cdp = await context.newCDPSession(page);
+      await cdp.send("Input.imeSetComposition", { text: "zhong", selectionStart: 5, selectionEnd: 5 });
+      await page.waitForTimeout(50);
+      await cdp.send("Input.imeSetComposition", { text: "中文", selectionStart: 2, selectionEnd: 2 });
+      await page.waitForTimeout(50);
+      await cdp.send("Input.insertText", { text: "中文" });
+      await page.keyboard.press("Enter");
+      await waitOutput("a中文bc");
+
       await hidePanel();
       await showSidebar();
       await page.getByText("note.txt", { exact: true }).click();

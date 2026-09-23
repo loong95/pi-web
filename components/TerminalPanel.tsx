@@ -65,6 +65,17 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError }
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(container);
+    // xterm 6.0.0 assumes an IME composition appends to its helper textarea. screenReaderMode
+    // keeps typed characters in that textarea so screen readers can read them back, and the arrow
+    // keys move its caret, so composing in front of an existing character makes xterm send the
+    // trailing text instead of the composed characters (xtermjs/xterm.js#5456). Pin the caret to
+    // the end as the composition starts; the terminal cursor is separate and unaffected. Upstream
+    // records the range from the textarea selection instead, which needs a 6.1 beta.
+    const pinCompositionCaret = () => {
+      const textarea = container.querySelector<HTMLTextAreaElement>(".xterm-helper-textarea");
+      textarea?.setSelectionRange(textarea.value.length, textarea.value.length);
+    };
+    container.addEventListener("compositionstart", pinCompositionCaret, true);
     terminal.attachCustomKeyEventHandler((event) => {
       if (event.type !== "keydown") return true;
       const key = event.key.toLowerCase();
@@ -165,6 +176,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError }
       disposed = true;
       events?.close();
       void writer.stop();
+      container.removeEventListener("compositionstart", pinCompositionCaret, true);
       resizeObserver.disconnect();
       onData.dispose();
       onResize.dispose();

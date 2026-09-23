@@ -55,6 +55,17 @@ On Debian/Ubuntu, install `python3` and `build-essential` first. This forces a
 source build instead of reusing a missing or incompatible prebuilt binary.
 Restart Pi Web after repair.
 
+## Input
+
+xterm's IME helper assumes a composition appends to its internal textarea.
+Because `screenReaderMode` keeps the typed characters in that textarea for
+assistive technology and lets the arrow keys move its caret, a composition
+started in front of an existing character made xterm send the trailing text
+instead of the composed characters. `TerminalPanel` therefore pins the caret to
+the end as a composition starts; the terminal's own cursor position is
+unaffected. Upstream records the composition range from the textarea selection
+instead (xtermjs/xterm.js#5456, in 6.1).
+
 ## Verification
 
 Run `npm test` for native PTY, lease, output cursor, input queue, and storage

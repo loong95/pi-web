@@ -27,6 +27,13 @@ const TERMINAL_SUBAGENT_STATUSES = new Set<SubagentRunInfo["status"]>(["complete
  * entry carries, so the chat would lose the link to the child session.
  */
 const SUBAGENT_TOOL_EXPOSURE = "model-only" satisfies ToolExposure;
+/**
+ * Statuses a run can still leave on its own. `get_subagent_result({ wait: true })` polls while a
+ * run is in one of them, and `subagentFinalText` reports the same set as "is <status>": a run
+ * waiting for a `maxConcurrent` slot sits in `queued` for as long as its siblings run, and a wait
+ * loop or a text branch that only knows `starting`/`running` tells the model it concluded.
+ */
+const UNFINISHED_SUBAGENT_STATUSES = new Set<SubagentRunInfo["status"]>(["queued", "starting", "running"]);
 
 export interface SubagentToolDetails {
   kind: "pi-web-subagent";
@@ -129,7 +136,7 @@ function worktreeOutcomeText(run: SubagentRunInfo): string | undefined {
 }
 
 export function subagentFinalText(run: SubagentRunInfo): string {
-  if (run.status === "starting" || run.status === "running") {
+  if (UNFINISHED_SUBAGENT_STATUSES.has(run.status)) {
     return `Subagent ${run.sessionId} is ${run.status}.`;
   }
   // Keep the session ID in the text: the model only sees `content`, never `details`, and needs it for `resume` / `get_subagent_result`.
@@ -292,7 +299,7 @@ export function createSubagentExtension(
         async execute(_toolCallId, params, signal) {
           let run = await runtime.get(params.agent_id);
           if (!run) return { content: [{ type: "text", text: `Subagent not found: ${params.agent_id}` }], details: undefined, isError: true };
-          while (params.wait && (run.status === "starting" || run.status === "running")) {
+          while (params.wait && UNFINISHED_SUBAGENT_STATUSES.has(run.status)) {
             await new Promise<void>((resolve, reject) => {
               const onAbort = () => {
                 clearTimeout(timer);

@@ -160,6 +160,9 @@ package-lock.json
 | 后台 subagent 完成通知加"非用户消息"标记 | `54aa49c` (#935) `SUBAGENT_NOTIFICATION_PREFIX` | 删除本分支实现，保留上游 |
 | `get_subagent_result` 取回结果后抑制重复完成通知 | `12d3599` (#937) 已消费结果集合 + 父会话空闲轮询 | 删除本分支实现，保留上游 |
 | 会话命名改走有界纯文本 transcript | `974c8bb` (#807) | 保留上游实现；本分支只保留它的上层改动（自动命名触发、实验设置、标题模型） |
+| 文件树「显示被忽略文件」开关（`?type=list&ignored=1`，服务端 `file-browser.json` 的 `showIgnored`） | `2f6a0a9` (#1092) files 标签 head 的 eye 开关 + `hidden=1`，回传 `hidden: ignored\|excluded` 并变暗显示，偏好存在 `lib/sidebar-prefs.ts` | 删除本分支实现（含 `file-browser.json` 的 `showIgnored` 键与 `FileBrowserSettings` 里的开关），保留上游；`file-browser.json` 只留 `searchExclude` |
+| 会话列表按当前 worktree 过滤 | 上游未实现；本分支保留（`lib/worktree-session-scope.ts` + `visibleSessions`） | 保留，但已改接到上游的 `buildSessionTree`/`buildArchiveRows` 之上 |
+| worktree 切换器里的 unread/running 徽标（`getWorktreeActivity`、`showProjectActivity`） | `ProjectWorktreePicker` 自带 `projectActivity` 徽标与「其他项目有活动」小点 | 删除本分支实现，保留上游 |
 
 判断原则：上游实现了同一能力时整块交给上游；本分支特有的部分（如自动命名触发与设置、标题模型选择）保留，但要改用上游的重构后接口，而不是把旧实现一起带回来。
 

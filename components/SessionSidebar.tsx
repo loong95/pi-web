@@ -5,7 +5,7 @@ import type { SessionInfo } from "@/lib/types";
 import { listSessionFamilies, type SessionFamily } from "@/lib/session-family";
 import { dispatchSessionRowContextMenu } from "@/lib/session-row-context-menu";
 import { sessionDeepLink } from "@/lib/session-links";
-import { getProjectActivity, getRecentProjects, getWorktreeActivity, sessionsForProject } from "@/lib/project-groups";
+import { getProjectActivity, getRecentProjects } from "@/lib/project-groups";
 import { workspaceKeyOf } from "@/lib/workspace-memory";
 import {
   isWorktreeSessionScopeEnabled,
@@ -1378,23 +1378,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       unreadSessionIds,
     ),
     [allSessions, archiveIndex, runningSessionIds, unreadSessionIds],
-  );
-
-  // Per-worktree counts so the worktree switcher can point at the checkout
-  // that actually has unread or running sessions.
-  const worktreeActivity = useMemo(
-    () => getWorktreeActivity(allSessions, runningSessionIds, unreadSessionIds),
-    [allSessions, runningSessionIds, unreadSessionIds],
-  );
-
-  // Any activity in a project other than the one currently selected — shown as
-  // a dot on the (collapsed) selector button so it is visible without opening
-  // the dropdown.
-  const hasOtherWorkspaceActivity = useMemo(
-    () => [...projectActivity.entries()].some(
-      ([key, { running, unread }]) => key !== selectedProject?.key && (running > 0 || unread > 0),
-    ),
-    [projectActivity, selectedProject],
   );
 
   const showWorktreeSwitcher = Boolean(

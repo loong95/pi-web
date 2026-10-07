@@ -18,13 +18,10 @@ test("scopes the session list to the current worktree behind the experimental pr
   assert.match(source, /currentWorktreeKey: string \| null/);
   assert.match(source, /currentWorktreeKey: d\.currentWorktreeKey \?\? null/);
   assert.match(source, /const worktreeScopeKey = worktreeSessionScope \? worktreeState\?\.currentWorktreeKey \?\? null : null/);
-  assert.match(source, /filteredSessions\.filter\(\(session\) => session\.worktreeKey === worktreeScopeKey\)/);
-  assert.match(source, /listSessionFamilies\(scopedSessions\)/);
+  assert.match(source, /allSessions\.filter\(\(session\) => session\.worktreeKey === worktreeScopeKey\)/);
+  // The tree, its families and the archive all read the scoped set, so the
+  // preference cannot hide a row in one place and show it in another.
+  assert.match(source, /listSessionFamilies\(visibleSessions\)/);
+  assert.match(source, /sessions: visibleSessions,/);
   assert.match(source, /addEventListener\(WORKTREE_SESSION_SCOPE_EVENT, sync\)/);
-});
-
-test("shows per-worktree unread and running activity in the switcher", () => {
-  assert.match(source, /key\?: string/);
-  assert.match(source, /getWorktreeActivity\(allSessions, runningSessionIds, unreadSessionIds\)/);
-  assert.match(source, /showProjectActivity\(wt\.key \? worktreeActivity\.get\(wt\.key\) : undefined, t\)/);
 });

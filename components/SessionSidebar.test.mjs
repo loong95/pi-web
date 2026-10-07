@@ -110,7 +110,7 @@ test("subagents fold into their main session row, which carries their running, u
   assert.deepEqual(sessionRows.map((row) => row.family.root.id), ["main"]);
   assert.deepEqual(sessionRows[0].status, { running: true, awaiting: false, unread: true, selected: true, transient: false });
   // The sidebar builds that model from the whole catalog, subagents included,
-  // narrowed by the experimental worktree scope (which is a no-op when off).
+  // narrowed by the experimental worktree scope (a no-op when it is off).
   assert.match(source, /const model = useMemo\(\(\) => buildSessionTree\(\{\s*sessions: visibleSessions,/);
   assert.match(source, /const visibleSessions = useMemo\(/);
   assert.doesNotMatch(source, /function SessionItem|function SessionTreeItem|getSessionListIndices/);

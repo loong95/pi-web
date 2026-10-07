@@ -30,16 +30,16 @@ function write(filePath, content = "") {
   fs.writeFileSync(filePath, content);
 }
 
-function request(filePath, type) {
+function request(filePath, type, query = "") {
   const segments = filePath.replace(/\\/g, "/").split("/").filter(Boolean);
   return GET(
-    new NextRequest(`http://localhost/api/files/x?type=${type}`),
+    new NextRequest(`http://localhost/api/files/x?type=${type}${query}`),
     { params: Promise.resolve({ path: segments }) },
   );
 }
 
-async function listNames(dir) {
-  const response = await request(dir, "list");
+async function listNames(dir, query = "") {
+  const response = await request(dir, "list", query);
   assert.equal(response.status, 200);
   const { entries } = await response.json();
   return entries.map((entry) => entry.name);

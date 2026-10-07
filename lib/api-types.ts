@@ -883,6 +883,12 @@ export interface PluginPackageInfo {
   status: "loaded" | "installed" | "missing" | "disabled";
 }
 
+/** Settings › Files: the file explorer's own preferences. */
+export interface FileBrowserSettingsResponse {
+  /** Project-relative patterns the `@` file index never lists. */
+  searchExclude: string[];
+}
+
 export interface PluginsResponse {
   packages: PluginPackageInfo[];
   standaloneExtensions: PluginStandaloneExtensionInfo[];

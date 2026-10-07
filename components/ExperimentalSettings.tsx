@@ -8,6 +8,7 @@ import {
 } from "@/lib/worktree-session-scope";
 import { PlantUmlSettings } from "./PlantUmlSettings";
 import { SessionTitleSettings } from "./SessionTitleSettings";
+import { FileBrowserSettings } from "./FileBrowserSettings";
 import { ConfigSwitch } from "./SettingsUi";
 
 export function ExperimentalSettings({ cwd = null }: { cwd?: string | null }) {
@@ -40,6 +41,8 @@ export function ExperimentalSettings({ cwd = null }: { cwd?: string | null }) {
       </section>
 
       <SessionTitleSettings cwd={cwd} />
+
+      <FileBrowserSettings />
 
       <PlantUmlSettings />
     </div>

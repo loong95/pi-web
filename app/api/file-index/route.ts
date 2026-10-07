@@ -11,6 +11,8 @@ import {
 } from "@/lib/file-access";
 import { buildEntriesFromFiles, filterFileEntries, type FileIndexEntry } from "@/lib/file-fuzzy";
 import { isHiddenOutsideGit } from "@/lib/file-tree-visibility";
+import { readFileBrowserSettingsSafely } from "@/lib/file-browser-settings";
+import { compileExclusionPatterns, isExcludedPath, type ExclusionSet } from "@/lib/search-exclude";
 
 const execFileAsync = promisify(execFile);
 
@@ -68,7 +70,17 @@ async function listWithGit(cwd: string): Promise<FileListing | null> {
   }
 }
 
-function listWithWalk(cwd: string): FileListing {
+/**
+ * The listing with `searchExclude` applied: the settings' patterns are the
+ * only filter here, on top of what Git already leaves out (its ignored view)
+ * or, outside a work tree, the name list.
+ */
+function withoutExcludedPaths(files: string[], patterns: ExclusionSet): string[] {
+  if (patterns.sources.length === 0) return files;
+  return files.filter((file) => !isExcludedPath(file, patterns, false));
+}
+
+function listWithWalk(cwd: string, patterns: ExclusionSet): FileListing {
   const files: string[] = [];
   // BFS so shallow files win when the cap truncates the listing.
   const queue: Array<{ abs: string; rel: string; depth: number }> = [{ abs: cwd, rel: "", depth: 0 }];
@@ -85,6 +97,7 @@ function listWithWalk(cwd: string): FileListing {
       // rely on .gitignore instead (matches the TUI's fd behavior).
       if (isHiddenOutsideGit(d.name)) continue;
       const childRel = rel ? `${rel}/${d.name}` : d.name;
+      if (isExcludedPath(childRel, patterns, d.isDirectory())) continue;
       if (d.isDirectory()) {
         if (depth + 1 <= MAX_WALK_DEPTH) {
           queue.push({ abs: path.join(abs, d.name), rel: childRel, depth: depth + 1 });
@@ -135,15 +148,21 @@ export async function GET(req: NextRequest) {
 
     const cache = getIndexCache();
     const now = Date.now();
-    let cached = cache.get(cwd);
+    // The settings are read per request, so a saved pattern applies to the
+    // next listing without a restart. The cache key carries the patterns, so a
+    // change never serves the previous filter's answer.
+    const patterns = compileExclusionPatterns(readFileBrowserSettingsSafely().searchExclude);
+    const cacheKey = patterns.sources.length === 0 ? cwd : `${cwd}\0${patterns.sources.join("\0")}`;
+    let cached = cache.get(cacheKey);
     if (!cached || cached.expiresAt <= now) {
-      const listing = (await listWithGit(cwd)) ?? listWithWalk(cwd);
+      const listing = (await listWithGit(cwd)) ?? listWithWalk(cwd, patterns);
+      const files = withoutExcludedPaths(listing.files, patterns);
       for (const [key, entry] of cache) {
         if (entry.expiresAt <= now) cache.delete(key);
       }
       if (cache.size >= CACHE_MAX_ENTRIES) cache.clear();
-      cached = { listing, expiresAt: now + CACHE_TTL_MS };
-      cache.set(cwd, cached);
+      cached = { listing: { files, hardTruncated: listing.hardTruncated }, expiresAt: now + CACHE_TTL_MS };
+      cache.set(cacheKey, cached);
     }
 
     if (query) {

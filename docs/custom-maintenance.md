@@ -170,6 +170,12 @@ package-lock.json
 
 判断原则：上游实现了同一能力时整块交给上游；本分支特有的部分（如自动命名触发与设置、标题模型选择）保留，但要改用上游的重构后接口，而不是把旧实现一起带回来。
 
+反向的情况同样要记录：**上游没有对应实现的改动不要顺手删掉**。目前只有一条：
+
+| 本分支保有的改动 | 上游现状 | 说明 |
+| --- | --- | --- |
+| 后台 subagent 完成后**不推送结果**，只在父会话 `agent_settled`（或父会话空闲）时汇总一条不含结果的状态通知；结果由主 agent 用 `get_subagent_result` 主动读取（`scheduleParentReport()` / 待发送报告队列） | 上游 `notifyParent()` 在父会话空闲后把完整结果以 `followUp` + `triggerTurn` 推给父会话 | 本分支保留：这是为避免子 agent 完成打断主 agent 正在运行的流程而改的调度语义。若上游实现了等价的“延迟状态 + 按需取结果”再交还上游 |
+
 ## PlantUML 特有说明
 
 PlantUML Server URL 存储在用户目录的 `~/.pi/agent/plantuml.json`，不属于仓库内容，不应提交。每次有较大上游更新（特别是 Next.js、React、Markdown 或 Settings 相关更新）后，按 [PlantUML 验收指南](./plantuml-acceptance.md) 用自托管 PlantUML Server 做一次冒烟验证。

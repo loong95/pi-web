@@ -124,7 +124,7 @@ export interface DebugSubagentRun {
   mcpWaiting: boolean;
 }
 
-/** A background run's completion still being delivered to its parent (`notifyParent()`). */
+/** A background run's completion still being delivered to its parent (`scheduleParentReport()`). */
 export interface DebugParentNotification {
   sessionId: string;
   parentSessionId: string;

@@ -468,11 +468,12 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
 
   const initialPromptSentRef = useRef(false);
   useEffect(() => {
-    if (loading || error || !initialPrompt || initialPromptSentRef.current) return;
+    // A subagent's tab is read-only: a seed prompt would be a send.
+    if (readOnlySession || loading || error || !initialPrompt || initialPromptSentRef.current) return;
     initialPromptSentRef.current = true;
     onInitialPromptConsumed?.();
     void handleSend(initialPrompt);
-  }, [initialPrompt, loading, error, handleSend, onInitialPromptConsumed]);
+  }, [initialPrompt, loading, error, handleSend, onInitialPromptConsumed, readOnlySession]);
 
   // One sound when a dialog appears with none on screen. A dialog queued behind
   // another one surfaces the moment the user answers that one, so it stays quiet.

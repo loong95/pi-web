@@ -174,7 +174,7 @@ package-lock.json
 
 | 本分支保有的改动 | 上游现状 | 说明 |
 | --- | --- | --- |
-| 子代理标签页**只读**：没有输入框，原输入位置显示「子代理会话 · 只读」说明；子代理在主对话里打开也同样只读（`ChatWindow` 的 `readOnlySession`） | 上游 `SessionChatPanel` 把它当普通聊天，带完整 composer，可直接向子代理发消息（其 `settleDirectTurn()` 会把这一轮当作该 run 的结算） | 本分支保留：向子代理发消息会让人误以为在跟主代理对话，流程容易乱。服务端 `POST /api/agent/[id]` 仍可发，只是页面不再提供入口 |
+| 子代理标签页**只读**：没有输入框，原输入位置显示「子代理会话 · 只读」说明；子代理在主对话里打开也同样只读，`useAgentSession` 的发送入口还会统一拒绝（`refuseSubagentSend`，`ChatWindow` 的 `readOnlySession`） | 上游 `SessionChatPanel` 把它当普通聊天，带完整 composer，可直接向子代理发消息（其 `settleDirectTurn()` 会把这一轮当作该 run 的结算） | 本分支保留：向子代理发消息会让人误以为在跟主代理对话，流程容易乱。服务端 `POST /api/agent/[id]` 仍可发，只是页面不再提供入口 |
 | 后台 subagent 完成后**不推送任何消息**：结果只记在待发报告表里，页面在输入框上方显示气泡，由**用户点击**才发出一份不含结果的聚合状态（`scheduleParentReport()` 只记录，`POST /api/agent/[id]/subagent-reports` 才投递） | 上游 `notifyParent()` 在父会话空闲后把完整结果以 `followUp` + `triggerTurn` 自动推给父会话 | 本分支保留：不自动发是产品决定（不让子 agent 的完成打断或唤醒主 agent 的回合）。上游若实现了“状态 + 用户触发”再交还上游 |
 
 ## PlantUML 特有说明

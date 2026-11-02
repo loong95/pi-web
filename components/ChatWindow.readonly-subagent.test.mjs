@@ -32,6 +32,8 @@ test("a read-only transcript offers no way to send", () => {
   // A drop would upload into the child's working directory.
   assert.match(source, /const dropHandlers = readOnlySession\s*\n\s*\? \{ onDragEnter: undefined/);
   assert.match(source, /onDrop=\{dropHandlers\.onDrop\}/);
+  // A seed prompt (a side chat's first message) would be a send too.
+  assert.match(source, /if \(readOnlySession \|\| loading \|\| error \|\| !initialPrompt/);
 });
 
 test("the read-only note says what the tab is and where a message belongs", async () => {

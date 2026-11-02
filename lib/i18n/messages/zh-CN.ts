@@ -214,6 +214,7 @@ export const zhCNLocale: LocalePlugin = {
     "agentSwitcher.sideChat": "侧聊",
     "subagent.readOnly.title": "子代理会话 · 只读",
     "subagent.readOnly.hint": "这里不能发送消息：请在主对话里说明，由 Agent 工具转达给子代理。",
+    "subagent.readOnly.blocked": "子代理会话是只读的 —— 请在主对话里发送",
     "subagentReports.pendingOne": "1 个后台子代理结果尚未读取",
     "subagentReports.pending": "{count} 个后台子代理结果尚未读取",
     "subagentReports.resumed": "已续跑",

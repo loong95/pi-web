@@ -1411,10 +1411,26 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     });
   }, []);
 
+  /**
+   * The page never sends into a subagent (docs/agents/subagents.md): its tab has no
+   * composer, and every send funnel below asks this first, so no other view — a
+   * restored draft, a future button, an extension status command — can send either.
+   * `POST /api/agent/[id]` still accepts a prompt for such a session; the rule is
+   * the page's alone.
+   */
+  const sessionRelationKind = opts.session?.relation?.kind;
+  const translateForSend = opts.t;
+  const refuseSubagentSend = useCallback((): boolean => {
+    if (sessionRelationKind !== "subagent") return false;
+    addNotice({ type: "warning", message: translateForSend("subagent.readOnly.blocked") });
+    return true;
+  }, [addNotice, sessionRelationKind, translateForSend]);
+
   // The user clicked the chip's send button: the pending status report reaches the session now.
   // The delivered report lands as a custom message via the stream, and the server's
   // subagent_reports event clears the chip; a failure leaves it in place.
   const handleDeliverSubagentReports = useCallback(async () => {
+    if (refuseSubagentSend()) return;
     const sid = sessionIdRef.current;
     if (!sid || pendingSubagentReports.length === 0) return;
     try {
@@ -1426,7 +1442,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } catch (error) {
       addNotice({ type: "error", message: error instanceof Error ? error.message : String(error) });
     }
-  }, [addNotice, pendingSubagentReports.length]);
+  }, [addNotice, pendingSubagentReports.length, refuseSubagentSend]);
   const translateRef = useRef(opts.t);
   translateRef.current = opts.t;
   const translate = useCallback((key: string, params?: TranslationParams) => translateRef.current(key, params), []);
@@ -2114,6 +2130,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]) => {
     const trimmedMessage = message.trim();
     if (!trimmedMessage && !images?.length) return;
+    if (refuseSubagentSend()) return;
     if (agentRunningRef.current || bashRunningRef.current) {
       restoreSubmission(message, images, composerDraftKey);
       return;
@@ -2281,7 +2298,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setAgentPhase(null);
       dispatch({ type: "end" });
     }
-  }, [isNew, newSessionCwd, newSessionModel, session, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice, releaseUnconfirmedSend, cancelEventStreamGrace, closeEvents, composerDraftKey, dispatch, reconcileAgentState, restoreSubmission, editEntryId, setEdit]);
+  }, [isNew, newSessionCwd, newSessionModel, session, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice, releaseUnconfirmedSend, cancelEventStreamGrace, closeEvents, composerDraftKey, dispatch, reconcileAgentState, restoreSubmission, editEntryId, setEdit, refuseSubagentSend]);
 
   const executeBash = useCallback(async (command: string, excludeFromContext: boolean) => {
     if (agentRunningRef.current || bashRunningRef.current) return;
@@ -2762,6 +2779,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     behavior: "steer" | "followUp",
     images?: AttachedImage[],
   ) => {
+    if (refuseSubagentSend()) return;
     const sid = sessionIdRef.current;
     const restore = () => restoreSubmission(message, images, composerDraftKey);
     // A pending history edit must branch when sent, never join the current run.
@@ -2795,7 +2813,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (isPromptRejectedError(e)) addNotice({ type: "error", message: e.message });
       else addUnconfirmedSendNotice();
     }
-  }, [addNotice, addUnconfirmedSendNotice, composerDraftKey, editEntryId, restoreSubmission]);
+  }, [addNotice, addUnconfirmedSendNotice, composerDraftKey, editEntryId, refuseSubagentSend, restoreSubmission]);
 
   const handleSteer = useCallback(async (message: string, images?: AttachedImage[]) => {
     await sendStreamingPrompt(message, "steer", images);

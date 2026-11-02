@@ -24,6 +24,8 @@ function runHandleAgentEnd({ end, selectedSession, attention }) {
     setExplorerRefreshKey: () => {},
     selectedSession,
     isHiddenRelation,
+    // Experimental auto naming runs after the badge's guard; stub it here.
+    requestAutoTitle: () => {},
     shouldShowBrowserNotification: () => attention,
     deliverSessionNotification: (notice) => notifications.push(notice),
     translate: (key) => key,

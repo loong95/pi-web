@@ -3026,3 +3026,73 @@ span.token.table {
     display: none !important;
   }
 }
+
+/* The uncollected-background-subagent-results chip (PendingSubagentReports), above the
+   composer: a quiet card naming each unread result, with the one action the runtime allows —
+   the user sends the aggregated status report; nothing is delivered on its own. */
+.pending-subagent-reports {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.pending-subagent-reports-body {
+  min-width: 0;
+  flex: 1;
+}
+.pending-subagent-reports-title {
+  display: block;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.pending-subagent-reports-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pending-subagent-reports-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.pending-subagent-reports-name {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pending-subagent-reports-status {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.pending-subagent-reports-send {
+  flex-shrink: 0;
+  align-self: center;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.pending-subagent-reports-send:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+.pending-subagent-reports-send:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

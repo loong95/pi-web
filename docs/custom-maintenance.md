@@ -174,7 +174,7 @@ package-lock.json
 
 | 本分支保有的改动 | 上游现状 | 说明 |
 | --- | --- | --- |
-| 后台 subagent 完成后**不推送结果**，只在父会话 `agent_settled`（或父会话空闲）时汇总一条不含结果的状态通知；结果由主 agent 用 `get_subagent_result` 主动读取（`scheduleParentReport()` / 待发送报告队列） | 上游 `notifyParent()` 在父会话空闲后把完整结果以 `followUp` + `triggerTurn` 推给父会话 | 本分支保留：这是为避免子 agent 完成打断主 agent 正在运行的流程而改的调度语义。若上游实现了等价的“延迟状态 + 按需取结果”再交还上游 |
+| 后台 subagent 完成后**不推送任何消息**：结果只记在待发报告表里，页面在输入框上方显示气泡，由**用户点击**才发出一份不含结果的聚合状态（`scheduleParentReport()` 只记录，`POST /api/agent/[id]/subagent-reports` 才投递） | 上游 `notifyParent()` 在父会话空闲后把完整结果以 `followUp` + `triggerTurn` 自动推给父会话 | 本分支保留：不自动发是产品决定（不让子 agent 的完成打断或唤醒主 agent 的回合）。上游若实现了“状态 + 用户触发”再交还上游 |
 
 ## PlantUML 特有说明
 

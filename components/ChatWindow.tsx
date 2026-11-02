@@ -18,6 +18,7 @@ import { dropMentionText, splitDroppedItems, uploadFiles, type DroppedItem } fro
 import { MessageView } from "./MessageView";
 import { MarkdownBody } from "./MarkdownBody";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
+import { PendingSubagentReports } from "./PendingSubagentReports";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
 import { ExtensionStatusBar } from "./ExtensionStatusBar";
 import { AnsiText } from "./AnsiText";
@@ -289,6 +290,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     retryInfo, contextUsage, forkingEntryId,
     isCompacting, compactError, compactResult, displayModel: displayModelValue, modelSwitching, sessionStats,
     slashCommands, slashCommandsLoading, queuedMessages,
+    pendingSubagentReports, handleDeliverSubagentReports,
     notices, extensionDialog, waitingExtensionDialogCount, extensionCustomUi, waitingExtensionCustomUiCount, extensionStatuses, extensionWidgets, respondToExtensionUi, sendExtensionCustomInput, setNoticePaused, addNotice,
     isAutoModelSelection,
     isAutoThinkingSelection,
@@ -1508,6 +1510,11 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
               </div>
               {newSessionContextBar}
             </div>
+          </div>
+        )}
+        {pendingSubagentReports.length > 0 && (
+          <div style={{ padding: "0 16px", paddingRight: isMobile ? 16 : 52 }}>
+            <PendingSubagentReports reports={pendingSubagentReports} onSend={handleDeliverSubagentReports} />
           </div>
         )}
         {chatInputElement}

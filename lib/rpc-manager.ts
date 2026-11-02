@@ -47,6 +47,7 @@ import {
   subagentExtensionLoaderOptions,
   subagentToolOptions,
   SUBAGENT_CONTROL_TOOL_NAMES,
+  type SubagentRunInfo,
 } from "./subagents";
 import {
   hasSideMetadata,
@@ -997,6 +998,25 @@ export class AgentSessionWrapper {
         );
       }
     }
+  }
+
+  /**
+   * The page's uncollected-background-results chip: the runtime calls this whenever the pending
+   * report table for this session changes, and the current list rides to the page on its event
+   * stream — no polling, and it works while the session is idle (no run is started).
+   */
+  notifyPendingSubagentReports(reports: SubagentRunInfo[]): void {
+    this.emit({
+      type: "subagent_reports",
+      reports: reports.map((run) => ({
+        sessionId: run.sessionId,
+        profile: run.profile,
+        description: run.description,
+        status: run.status,
+        resumed: run.resumed === true,
+        completedAt: run.completedAt,
+      })),
+    });
   }
 
   private async acquirePromptAdmission(): Promise<() => void> {
@@ -2573,6 +2593,10 @@ const SUBAGENT_CONTROLLER = createSubagentController({
     (await startRpcSession(sessionId, sessionFile, undefined)).session,
   resolveSessionPath,
   invalidateSessionList: invalidateSessionListCache,
+  notifyPendingReports: (parentSessionId, reports) => {
+    // A report exists only for a session a page may hold open; an unknown id has no stream.
+    getRegistry().get(parentSessionId)?.notifyPendingSubagentReports(reports);
+  },
   isBuiltInSubagentsEnabled,
 });
 
@@ -2582,6 +2606,16 @@ export function getSubagentRun(sessionId: string) {
 
 export function steerSubagent(sessionId: string, message: string) {
   return SUBAGENT_CONTROLLER.steer(sessionId, message);
+}
+
+/** The session's unread background results, for the page's chip above the composer. */
+export function getPendingSubagentReports(sessionId: string) {
+  return SUBAGENT_CONTROLLER.pendingReports(sessionId);
+}
+
+/** Send the session's pending status report now, on the user's click; returns the runs it named. */
+export function deliverSubagentReports(sessionId: string) {
+  return SUBAGENT_CONTROLLER.deliverReports(sessionId);
 }
 
 export function abortSubagent(sessionId: string) {

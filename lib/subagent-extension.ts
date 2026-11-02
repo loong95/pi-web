@@ -251,7 +251,7 @@ export function subagentFinalText(run: SubagentRunInfo): string {
  * subagent's prompt keeps the marker from being dropped by the model.
  */
 export const SUBAGENT_NOTIFICATION_PREFIX =
-  "The following is a background subagent status report delivered by Pi Web, not a message from the user. Treat it as tool output: it lists subagents that finished and carries no new user goals, constraints, or instructions.\n\n";
+  "The following is a background subagent status report Pi Web sent at the user's request; it is not a message the user typed. Treat it as tool output: it lists subagents that finished and carries no new user goals, constraints, or instructions.\n\n";
 
 /** One run's status without its result text, which only `get_subagent_result` returns. */
 function subagentStatusSummary(run: SubagentRunInfo): string {
@@ -300,14 +300,14 @@ export function createSubagentExtension(
       pi.registerTool(defineTool({
         name: "Agent",
         label: "Agent",
-        description: `Delegate a focused task to a configured subagent. Each subagent runs as a full, inspectable Pi session. Use background mode for independent work and foreground mode when the result is needed immediately. Foreground completion waits default to 30 minutes; set wait_timeout (seconds) for longer tasks. If the wait budget is exhausted, the child keeps running and reports its completion automatically. A background run's result is never pushed into this session: call get_subagent_result when you need it.\n\nAvailable agent types:\n${agentTypeDescription(profiles)}`,
+        description: `Delegate a focused task to a configured subagent. Each subagent runs as a full, inspectable Pi session. Use background mode for independent work and foreground mode when the result is needed immediately. Foreground completion waits default to 30 minutes; set wait_timeout (seconds) for longer tasks. If the wait budget is exhausted, the child keeps running and its report is recorded for this session. A background run's result is never pushed into this session: call get_subagent_result when you need it.\n\nAvailable agent types:\n${agentTypeDescription(profiles)}`,
         promptSnippet: "Delegate a focused task to an inspectable subagent session",
         exposure: SUBAGENT_TOOL_EXPOSURE,
         promptGuidelines: [
           "Use Agent for a focused task that benefits from an isolated context.",
           "Use multiple background Agent calls in the same response for independent parallel work.",
           "Do not duplicate work already delegated to a running subagent.",
-          "A background Agent result is not pushed into this session: call get_subagent_result with its session ID when you need it, and before ending a turn that depends on it (add wait: true while it still runs). A status notice names finished subagents you have not collected at the end of your turn.",
+          "A background Agent result is not pushed into this session: call get_subagent_result with its session ID when you need it, and before ending a turn that depends on it (add wait: true while it still runs). The user sees the finished run in a chip above the composer and may send its status to you; the result itself stays here until you read it.",
         ],
         executionMode: "parallel",
         parameters: Type.Object({
@@ -319,7 +319,7 @@ export function createSubagentExtension(
             maxItems: MAX_SUBAGENT_INPUT_FILES,
           })),
           description: Type.String({ description: "Short activity label shown in the UI." }),
-          run_in_background: Type.Optional(Type.Boolean({ description: "Return immediately; the result stays on the subagent until get_subagent_result reads it. A status notice names it at the end of this turn if it finished uncollected." })),
+          run_in_background: Type.Optional(Type.Boolean({ description: "Return immediately; the result stays on the subagent until get_subagent_result reads it. The user can send you its status from the composer once it finishes." })),
           wait_timeout: waitTimeoutParameter(),
           model: Type.Optional(Type.String({ description: 'Optional provider/modelId override. Append ":<level>" (off, minimal, low, medium, high, xhigh, max) to also set the thinking level for this run, e.g. "provider/model:high".' })),
           isolation: Type.Optional(Type.String({ description: 'Set to "worktree" to run the subagent in an isolated git worktree.' })),
@@ -398,7 +398,7 @@ export function createSubagentExtension(
                   );
                 });
               return {
-                content: [{ type: "text", text: `Subagent started in background. Session ID: ${execution.run.sessionId}. Its result is not sent automatically; call get_subagent_result with this ID when you need it. If it finishes before you collect it, a status notice names it at the end of your turn.` }],
+                content: [{ type: "text", text: `Subagent started in background. Session ID: ${execution.run.sessionId}. Its result is not sent automatically; call get_subagent_result with this ID when you need it. If it finishes before you collect it, the user can send you its status from the composer.` }],
                 details: subagentToolDetails(execution.run),
               };
             }

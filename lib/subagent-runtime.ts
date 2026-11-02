@@ -71,6 +71,8 @@ export interface SubagentRuntimeDependencies {
   reopenSession(sessionId: string, sessionFile: string): Promise<HostSession>;
   resolveSessionPath(sessionId: string): Promise<string | null>;
   invalidateSessionList(): void;
+  /** The page's chip: the wrapper emits the pending reports onto the session's event stream. */
+  notifyPendingReports?(parentSessionId: string, reports: SubagentRunInfo[]): void;
   isBuiltInSubagentsEnabled?(): boolean;
 }
 
@@ -81,6 +83,10 @@ export interface SubagentController {
   abort(sessionId: string): Promise<void>;
   /** A turn in a child's own chat ended: settles the run a restart cut off, if that is what the file holds. */
   settleDirectTurn(sessionId: string, aborted: boolean): void;
+  /** The unread background results of one session, for the page's chip. */
+  pendingReports(sessionId: string): SubagentRunInfo[];
+  /** Send the pending status report now, on the user's click; returns the runs it named. */
+  deliverReports(sessionId: string): Promise<SubagentRunInfo[]>;
 }
 
 type StoredSubagentExecution = {
@@ -104,15 +110,8 @@ declare global {
   var __piSubagentQueue: SubagentQueue<SubagentRunInfo> | undefined;
   var __piSubagentConsumedResults: Map<string, string> | undefined;
   var __piSubagentPendingReports: Map<string, Map<string, SubagentRunInfo>> | undefined;
-  var __piSubagentInFlightReports: Map<string, SubagentRunInfo[]> | undefined;
-  var __piSubagentParentWatches: Map<string, { inner: AgentSessionLike; unsubscribe: () => void }> | undefined;
-  var __piSubagentFlushingReports: Set<string> | undefined;
-  var __piSubagentReportRetries: Map<string, number> | undefined;
 }
 const SUBAGENT_CONTEXT_LIMIT = 50_000;
-const PARENT_IDLE_RECHECK_MS = 0;
-/** One retry after a failed delivery; a session that rejects both attempts waits for the next event. */
-const MAX_REPORT_RETRIES = 1;
 const SUBAGENT_NOTIFICATION_TYPE = "pi-web:subagent-notification";
 const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
@@ -188,48 +187,36 @@ function getPendingReports(): Map<string, Map<string, SubagentRunInfo>> {
   return globalThis.__piSubagentPendingReports;
 }
 
-function getInFlightReports(): Map<string, SubagentRunInfo[]> {
-  if (!(globalThis.__piSubagentInFlightReports instanceof Map)) globalThis.__piSubagentInFlightReports = new Map();
-  return globalThis.__piSubagentInFlightReports;
+/** The pending reports of one parent, for the page's chip and its events. */
+export function getPendingSubagentReports(parentSessionId: string): SubagentRunInfo[] {
+  return globalThis.__piSubagentPendingReports instanceof Map
+    ? [...(globalThis.__piSubagentPendingReports.get(parentSessionId)?.values() ?? [])]
+    : [];
 }
 
-/** One `agent_settled` subscription per live parent session, held only while a report is pending. */
-function getParentWatches(): Map<string, { inner: AgentSessionLike; unsubscribe: () => void }> {
-  if (!(globalThis.__piSubagentParentWatches instanceof Map)) globalThis.__piSubagentParentWatches = new Map();
-  return globalThis.__piSubagentParentWatches;
-}
-
-function getFlushingReports(): Set<string> {
-  if (!(globalThis.__piSubagentFlushingReports instanceof Set)) globalThis.__piSubagentFlushingReports = new Set();
-  return globalThis.__piSubagentFlushingReports;
-}
-
-/** Per-parent failed deliveries, so a session that keeps rejecting the message is not retried forever. */
-function getReportRetries(): Map<string, number> {
-  if (!(globalThis.__piSubagentReportRetries instanceof Map)) globalThis.__piSubagentReportRetries = new Map();
-  return globalThis.__piSubagentReportRetries;
-}
-
-function pendingReportRuns(): SubagentRunInfo[] {
-  return [
-    ...[...getPendingReports().values()].flatMap((runs) => [...runs.values()]),
-    ...[...getInFlightReports().values()].flat(),
-  ];
-}
-
-/** `pendingReportRuns()` without creating the tables: the debug snapshot reads them as they are. */
+/** Every pending report without creating the tables: the debug snapshot reads them as they are. */
 function peekReportRuns(): SubagentRunInfo[] {
-  const pending = globalThis.__piSubagentPendingReports instanceof Map
+  return globalThis.__piSubagentPendingReports instanceof Map
     ? [...globalThis.__piSubagentPendingReports.values()].flatMap((runs) => [...runs.values()])
     : [];
-  const inFlight = globalThis.__piSubagentInFlightReports instanceof Map
-    ? [...globalThis.__piSubagentInFlightReports.values()].flat()
-    : [];
-  return [...pending, ...inFlight];
 }
 
-function hasPendingReports(parentSessionId: string): boolean {
-  return (getPendingReports().get(parentSessionId)?.size ?? 0) > 0;
+/**
+ * Set from `createSubagentController()`: the wrapper emits the pending reports onto the parent
+ * session's event stream, so a connected page updates its chip the moment a result is recorded
+ * or read. The module-level table is shared across controllers, and so is this hook.
+ */
+let notifyPendingReportsHook: ((parentSessionId: string, reports: SubagentRunInfo[]) => void) | undefined;
+
+function notifyPendingReports(parentSessionId: string): void {
+  try {
+    notifyPendingReportsHook?.(parentSessionId, getPendingSubagentReports(parentSessionId));
+  } catch (error) {
+    console.error(
+      "[pi-web] failed to notify pending subagent reports:",
+      error instanceof Error ? error.message : error,
+    );
+  }
 }
 
 function addPendingReport(run: SubagentRunInfo): void {
@@ -239,6 +226,7 @@ function addPendingReport(run: SubagentRunInfo): void {
   // since `get_subagent_result` returns the latest run as well.
   runs.set(run.sessionId, run);
   pending.set(run.parentSessionId, runs);
+  notifyPendingReports(run.parentSessionId);
 }
 
 function dropPendingReport(run: Pick<SubagentRunInfo, "sessionId" | "parentSessionId" | "completedAt">): void {
@@ -248,36 +236,25 @@ function dropPendingReport(run: Pick<SubagentRunInfo, "sessionId" | "parentSessi
   if (!runs || !entry || entry.completedAt !== run.completedAt) return;
   runs.delete(run.sessionId);
   if (runs.size === 0) pending.delete(run.parentSessionId);
-}
-
-function unwatchParent(parentSessionId: string, inner?: AgentSessionLike): void {
-  const watches = getParentWatches();
-  const watch = watches.get(parentSessionId);
-  if (!watch || (inner && watch.inner !== inner)) return;
-  watches.delete(parentSessionId);
-  // Called from inside an `agent_settled` emit; pi splices its listener array while it
-  // iterates it, so the unsubscribe itself waits for the current stack to finish.
-  queueMicrotask(() => watch.unsubscribe());
+  notifyPendingReports(run.parentSessionId);
 }
 
 /**
- * Runs that can still start a turn in their parent: those in the run map, and the pending and
- * in-flight status reports. A report whose result the parent already collected with
- * `get_subagent_result` was never recorded (or is re-checked when the delivery claims it).
+ * Runs that can still start a turn in their parent: those in the run map. A pending status
+ * report never starts one on its own — it reaches the parent only when the user sends it from
+ * the page — so it does not keep a session unsettled: no stream is held open, no completion
+ * announcement deferred, and the idle reaper works as usual.
  */
 function unsettledSubagentRuns(): SubagentRunInfo[] {
-  return [
-    ...[...getSubagentRuns().values()].map((stored) => stored.run),
-    ...pendingReportRuns(),
-  ];
+  return [...getSubagentRuns().values()].map((stored) => stored.run);
 }
 
 /**
- * Whether a subagent run under this session, at any depth, is still unsettled: its end can
- * start a turn there (a pending status report with `triggerTurn`). A run counts from dispatch
- * until its result is written (the run map), then until its status report is delivered or the
- * turn it starts runs (#1434). A hidden page keeps the session's event stream while this holds
- * (#1283).
+ * Whether a subagent run under this session, at any depth, can still start a turn here: a run
+ * counts from dispatch until its result is written (the run map). A finished background run
+ * whose result is unread does not count: its report never starts a turn on its own (the page
+ * shows a chip and the user sends it), so no stream is held open for it and no completion
+ * announcement is deferred (#1283, #1434).
  */
 export function hasUnsettledSubagentRun(sessionId: string): boolean {
   return subagentFamily(sessionId, unsettledSubagentRuns()).size > 1;
@@ -367,21 +344,8 @@ function markResultConsumed(run: Pick<SubagentRunInfo, "sessionId" | "parentSess
   // A terminal run without `completedAt` (interrupted) never notifies, so there is nothing to drop.
   if (!run.completedAt) return;
   getConsumedSubagentResults().set(run.sessionId, run.completedAt);
-  // A report already waiting for its parent, or one being delivered right now, is not due:
-  // the parent read this very run itself.
+  // A report already waiting for its parent is not due: the parent read this very run itself.
   dropPendingReport(run);
-  const inFlight = getInFlightReports();
-  const claimed = inFlight.get(run.parentSessionId);
-  if (claimed) {
-    const remaining = claimed.filter((claimedRun) =>
-      claimedRun.sessionId !== run.sessionId || claimedRun.completedAt !== run.completedAt);
-    if (remaining.length === 0) inFlight.delete(run.parentSessionId);
-    else inFlight.set(run.parentSessionId, remaining);
-  }
-  // Nothing else is waiting for that parent: its settle subscription can go.
-  if (!hasPendingReports(run.parentSessionId) && !inFlight.has(run.parentSessionId)) {
-    unwatchParent(run.parentSessionId);
-  }
 }
 
 /** Take the mark only when it names this very run; a mark left by an earlier run is ignored. */
@@ -517,6 +481,7 @@ function recordResult(sessionManager: SessionManager, run: SubagentRunInfo): Sub
 export function createSubagentController(
   dependencies: SubagentRuntimeDependencies,
 ): SubagentController {
+  notifyPendingReportsHook = dependencies.notifyPendingReports;
   async function start(request: StartSubagentRequest): Promise<SubagentExecution> {
     const enabled = dependencies.isBuiltInSubagentsEnabled ?? isBuiltInSubagentsEnabled;
     if (!enabled()) throw new Error("Pi Web built-in sub-agents are disabled");
@@ -1087,68 +1052,6 @@ export function createSubagentController(
   }
 
   /**
-   * The last assistant message's `stopReason` says whether the parent's latest run was stopped
-   * from its own chat: a status after a Stop must not start an unattended run.
-   */
-  function lastParentRunWasAborted(parent: HostSession): boolean {
-    if (!parent.inner.sessionManager) return false;
-    return lastAssistantStop(parent.inner.sessionManager)?.aborted === true;
-  }
-
-  /**
-   * `agent_settled` is the only point where a report may start a turn: the parent's run is over
-   * (including every queued follow-up), so the message cannot be injected into work in progress.
-   * The subscription lives only while a report is pending for that parent.
-   */
-  function watchParentSettled(parentSessionId: string, parent: HostSession): void {
-    const watches = getParentWatches();
-    if (watches.get(parentSessionId)?.inner === parent.inner) return;
-    unwatchParent(parentSessionId);
-    const inner = parent.inner;
-    if (typeof inner.subscribe !== "function") return;
-    const unsubscribe = inner.subscribe((event) => {
-      if (event.type !== "agent_settled") return;
-      const live = dependencies.getSession(parentSessionId);
-      if (!live?.isAlive()) return;
-      // A replacement session owns its own run: reattach and let that session deliver.
-      if (live.inner !== inner) {
-        watchParentSettled(parentSessionId, live);
-        if (!live.isRunning()) scheduleIdleReport(parentSessionId);
-        return;
-      }
-      if (!hasPendingReports(parentSessionId)) {
-        unwatchParent(parentSessionId, inner);
-        return;
-      }
-      // Called synchronously from the settle emit: `sendCustomMessage` sees the SDK's settle
-      // flag and defers the message until the settle handlers are done. A run pi recorded as
-      // stopped counts as a Stop even if the controller did not request it.
-      void deliverPendingReports(parentSessionId, live, {
-        aborted: event.aborted === true || lastParentRunWasAborted(live),
-        settled: true,
-      });
-    });
-    watches.set(parentSessionId, { inner, unsubscribe });
-  }
-
-  /**
-   * A run that has just settled may still count as running through its wrapper (the prompt
-   * promise resolves a microtask later). One idle check catches that tail; a real run keeps the
-   * settle watch instead.
-   */
-  function scheduleIdleReport(parentSessionId: string): void {
-    setTimeout(() => {
-      if (!hasPendingReports(parentSessionId)) return;
-      const parent = dependencies.getSession(parentSessionId);
-      if (!parent?.isAlive() || parent.isRunning()) return;
-      void deliverPendingReports(parentSessionId, parent, {
-        aborted: lastParentRunWasAborted(parent),
-        settled: false,
-      });
-    }, PARENT_IDLE_RECHECK_MS);
-  }
-
-  /**
    * Takes every unconsumed report for one parent. A parent that already collected a run through
    * `get_subagent_result` leaves its mark, checked again here, so no status is sent for it.
    */
@@ -1173,116 +1076,56 @@ export function createSubagentController(
       if (run.parentSessionId !== parentSessionId || takeResultConsumed(run)) continue;
       addPendingReport(run);
     }
+    notifyPendingReports(parentSessionId);
   }
 
-  async function deliverPendingReports(
-    parentSessionId: string,
-    parent: HostSession,
-    options: { aborted: boolean; settled: boolean },
-  ): Promise<void> {
-    if (!hasPendingReports(parentSessionId)) {
-      if (!getInFlightReports().has(parentSessionId)) unwatchParent(parentSessionId);
-      return;
-    }
-    if (getFlushingReports().has(parentSessionId)) return;
-    if (!options.settled) {
-      if (parent.isRunning()) {
-        watchParentSettled(parentSessionId, parent);
-        return;
-      }
-      await parent.waitUntilReady();
-      // A prompt admitted while extensions bound counts as busy even before its run streams.
-      if (parent.isRunning()) {
-        watchParentSettled(parentSessionId, parent);
-        return;
-      }
-    }
-
-    const flushing = getFlushingReports();
-    // A triggered `sendCustomMessage` resolves only when the run it started settles, so this
-    // flag holds later reports through that status turn as well: none may interrupt it.
-    flushing.add(parentSessionId);
-    let claimed: SubagentRunInfo[] = [];
-    let retry = false;
+  /**
+   * The user asked for the report (the page's chip): one aggregated status message reaches the
+   * parent now. A running parent gets it as a `followUp`, which pi queues until the current run
+   * would otherwise stop — never into the middle of its tool loop — and then starts the turn; an
+   * idle parent starts the turn at once. A failed send restores the pending reports so the chip
+   * stays and the user can try again.
+   */
+  async function deliverPendingReports(parentSessionId: string): Promise<number> {
+    const claimed = claimPendingReports(parentSessionId);
+    if (claimed.length === 0) return 0;
+    notifyPendingReports(parentSessionId);
     try {
-      claimed = claimPendingReports(parentSessionId);
-      if (claimed.length === 0) return;
-      getInFlightReports().set(parentSessionId, claimed);
-      const delivery = parent.inner.sendCustomMessage({
+      // The pending table is process memory, not the wrapper's: a session whose idle timer
+      // reaped it still shows its chip, and the user's click reopens it to send the report.
+      let parent = dependencies.getSession(parentSessionId);
+      if (!parent?.isAlive()) {
+        const sessionFile = await dependencies.resolveSessionPath(parentSessionId);
+        if (!sessionFile) {
+          restorePendingReports(parentSessionId, claimed);
+          throw new Error(`Parent session not found: ${parentSessionId}`);
+        }
+        parent = await dependencies.reopenSession(parentSessionId, sessionFile);
+      }
+      await parent.inner.sendCustomMessage({
         customType: SUBAGENT_NOTIFICATION_TYPE,
         content: subagentStatusNotificationText(claimed),
         display: true,
         details: { kind: "pi-web-subagent-status", runs: claimed.map(subagentToolDetails) },
-      }, options.aborted ? undefined : { deliverAs: "followUp", triggerTurn: true });
-      // pi starts the turn before its first await, and resolves only once that turn settled. From
-      // here the parent's own run stands for this report: its end must not see the report as pending (#1434).
-      if (parent.isRunning()) getInFlightReports().delete(parentSessionId);
-      await delivery;
-      getInFlightReports().delete(parentSessionId);
-      getReportRetries().delete(parentSessionId);
-      claimed = [];
+      }, { deliverAs: "followUp", triggerTurn: true });
+      return claimed.length;
     } catch (error) {
-      getInFlightReports().delete(parentSessionId);
       restorePendingReports(parentSessionId, claimed);
-      const attempts = (getReportRetries().get(parentSessionId) ?? 0) + 1;
-      getReportRetries().set(parentSessionId, attempts);
-      retry = attempts <= MAX_REPORT_RETRIES;
-      console.error(
-        "[pi-web] failed to deliver subagent status:",
-        error instanceof Error ? error.message : error,
-      );
-    } finally {
-      flushing.delete(parentSessionId);
-      if (!hasPendingReports(parentSessionId)) {
-        getReportRetries().delete(parentSessionId);
-        unwatchParent(parentSessionId);
-        return;
-      }
-      const live = dependencies.getSession(parentSessionId);
-      if (live?.isAlive() && live.isRunning()) watchParentSettled(parentSessionId, live);
-      else if (retry) scheduleIdleReport(parentSessionId);
+      throw error;
     }
   }
 
   /**
    * A terminal run's result is recorded for its parent, never pushed. The parent reads it with
-   * `get_subagent_result`; until it does, one aggregated status report is delivered when the
-   * parent's turn ends (or at once while the parent is idle), so a finished task cannot be
-   * silently lost and a running turn is never redirected by it. A foreground run whose wait
-   * budget expired reports like a background one (#1448): its caller has moved on without it.
+   * `get_subagent_result`; until it does, the report stays pending and the page shows a chip
+   * above the composer. Nothing is sent on the runtime's own: no `agent_settled` delivery, no
+   * idle flush, no turn started without the user's click. A foreground run whose wait budget
+   * expired is recorded like a background one (#1448): its caller has moved on without it.
    */
   async function scheduleParentReport(run: SubagentRunInfo): Promise<void> {
     if (!run.completedAt) return;
     if (takeResultConsumed(run)) return;
     addPendingReport(run);
-    try {
-      let parent = dependencies.getSession(run.parentSessionId);
-      if (!parent?.isAlive()) {
-        const sessionFile = await dependencies.resolveSessionPath(run.parentSessionId);
-        if (!sessionFile) {
-          // The parent session file is gone: nobody can read this report, and keeping it would
-          // leave the run family permanently unsettled. The result stays in the child session.
-          dropPendingReport(run);
-          throw new Error(`Parent session not found: ${run.parentSessionId}`);
-        }
-        parent = await dependencies.reopenSession(run.parentSessionId, sessionFile);
-      }
-      watchParentSettled(run.parentSessionId, parent);
-      if (parent.isRunning()) {
-        // The settle watch delivers; the idle recheck covers a run that ended in the same tick.
-        scheduleIdleReport(run.parentSessionId);
-        return;
-      }
-      await deliverPendingReports(run.parentSessionId, parent, {
-        aborted: lastParentRunWasAborted(parent),
-        settled: false,
-      });
-    } catch (error) {
-      console.error(
-        "[pi-web] failed to record subagent status:",
-        error instanceof Error ? error.message : error,
-      );
-    }
   }
 
   async function abort(sessionId: string): Promise<void> {
@@ -1330,5 +1173,13 @@ export function createSubagentController(
     steer,
     abort,
     settleDirectTurn,
+    pendingReports: (sessionId) => getPendingSubagentReports(sessionId),
+    deliverReports: async (sessionId) => {
+      const before = getPendingSubagentReports(sessionId);
+      const delivered = await deliverPendingReports(sessionId);
+      // A claim that consumed nothing (empty queue, dead session, all marks consumed) changed
+      // nothing; only a real delivery removes the reports the caller saw.
+      return delivered > 0 ? before : [];
+    },
   };
 }

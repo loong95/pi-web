@@ -129,6 +129,16 @@ export interface QueuedMessages {
   followUp: string[];
 }
 
+/** One unread background subagent result, as the chip above the composer shows it. */
+export interface PendingSubagentReport {
+  sessionId: string;
+  profile: string;
+  description: string;
+  status: string;
+  resumed: boolean;
+  completedAt?: string;
+}
+
 /** The messages without that one (by identity, its last occurrence); the same array when it is absent. */
 function withoutMessage(messages: AgentMessage[], message: AgentMessage): AgentMessage[] {
   const index = messages.lastIndexOf(message);
@@ -492,6 +502,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [extensionStatuses, setExtensionStatuses] = useState<ExtensionStatusItem[]>([]);
   const [extensionWidgets, setExtensionWidgets] = useState<ExtensionWidgetItem[]>([]);
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessages>({ steering: [], followUp: [] });
+  // Background subagent results the session has not read yet. The runtime never sends them on
+  // its own; the chip above the composer names them and the user sends the report from there.
+  const [pendingSubagentReports, setPendingSubagentReports] = useState<PendingSubagentReport[]>([]);
 
   const eventConnectionRef = useRef<AgentEventConnection | null>(null);
   const eventStreamGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -636,6 +649,29 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   useEffect(() => {
     if (isNew) onNewSessionChoicesChange?.({ model: newSessionModel, thinkingLevel: newSessionThinkingLevel });
   }, [isNew, newSessionModel, newSessionThinkingLevel, onNewSessionChoicesChange]);
+
+  // The chip's list from the server: unread background results survive a reload (they are memory
+  // on the server, never sent on their own). The stream's subagent_reports events keep it current
+  // from here, and a (re)connect re-reads it, since those events are not replayed.
+  const refreshPendingSubagentReports = useCallback((sid: string) => {
+    fetch(`/api/agent/${encodeURIComponent(sid)}/subagent-reports`)
+      .then((r) => r.ok ? r.json() : { reports: [] })
+      .then((d: { reports?: PendingSubagentReport[] }) => {
+        if (sessionHookMountedRef.current && sessionIdRef.current === sid) {
+          setPendingSubagentReports(Array.isArray(d.reports) ? d.reports : []);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const sid = session?.id;
+    if (!sid) {
+      setPendingSubagentReports([]);
+      return;
+    }
+    refreshPendingSubagentReports(sid);
+  }, [session?.id, refreshPendingSubagentReports]);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     const container = scrollContainerRef.current;
@@ -1374,6 +1410,23 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       },
     });
   }, []);
+
+  // The user clicked the chip's send button: the pending status report reaches the session now.
+  // The delivered report lands as a custom message via the stream, and the server's
+  // subagent_reports event clears the chip; a failure leaves it in place.
+  const handleDeliverSubagentReports = useCallback(async () => {
+    const sid = sessionIdRef.current;
+    if (!sid || pendingSubagentReports.length === 0) return;
+    try {
+      const r = await fetch(`/api/agent/${encodeURIComponent(sid)}/subagent-reports`, { method: "POST" });
+      const d = await r.json().catch(() => null) as { success?: boolean; error?: string } | null;
+      if (!r.ok || !d?.success) {
+        throw new Error(d?.error ?? `HTTP ${r.status}`);
+      }
+    } catch (error) {
+      addNotice({ type: "error", message: error instanceof Error ? error.message : String(error) });
+    }
+  }, [addNotice, pendingSubagentReports.length]);
   const translateRef = useRef(opts.t);
   translateRef.current = opts.t;
   const translate = useCallback((key: string, params?: TranslationParams) => translateRef.current(key, params), []);
@@ -1767,6 +1820,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         // Opening the stream is what resumes an idle-reaped session, so the
         // mount's state read may have found no runtime and no usage to show.
         if (sessionIdRef.current) void refreshContextUsage(sessionIdRef.current);
+        // A run may have finished while the stream was down: re-read the chip's list, since the
+        // `subagent_reports` events it missed are not replayed.
+        if (sessionIdRef.current) void refreshPendingSubagentReports(sessionIdRef.current);
         break;
       }
       case "agent_start":
@@ -1852,6 +1908,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       case "prompt_error":
         addNotice({ type: "error", message: (event.errorMessage as string | undefined) ?? "Command failed" });
         break;
+      case "subagent_reports": {
+        // The server pushed the current unread-background-results list (a run was recorded or
+        // one was read/delivered); it also arrives on (re)connect via the GET below.
+        const reports = event.reports;
+        setPendingSubagentReports(Array.isArray(reports) ? reports as PendingSubagentReport[] : []);
+        break;
+      }
       case "extension_error":
         addNotice({
           type: "error",
@@ -2045,7 +2108,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setExtensionDialogs((queue) => removeExtensionUiRequest(queue, event.id as string));
         break;
     }
-  }, [addNotice, applyLiveUsage, cancelEventStreamGrace, dispatch, handleExtensionUiRequest, loadSession, markPromptLanded, notifyPromptStage, onAgentEnd, onToolEnd, refreshContextUsage, scheduleEventStreamClose, scrollToBottom, settleUiStage, syncLiveModel]);
+  }, [addNotice, applyLiveUsage, cancelEventStreamGrace, dispatch, handleExtensionUiRequest, loadSession, markPromptLanded, notifyPromptStage, onAgentEnd, onToolEnd, refreshContextUsage, refreshPendingSubagentReports, scheduleEventStreamClose, scrollToBottom, settleUiStage, syncLiveModel]);
   handleAgentEventRef.current = handleAgentEvent;
 
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]) => {
@@ -3296,6 +3359,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     retryInfo, contextUsage, systemPrompt, forkingEntryId,
     isCompacting, compactError, compactResult, currentModel, displayModel, modelSwitching, sessionStats, autoCompactionEnabled,
     slashCommands, slashCommandsLoading, queuedMessages,
+    pendingSubagentReports, handleDeliverSubagentReports,
     notices: noticeState.visible, extensionDialog, waitingExtensionDialogCount, extensionCustomUi, waitingExtensionCustomUiCount, extensionStatuses, extensionWidgets, respondToExtensionUi, sendExtensionCustomInput,
     isAutoModelSelection: isNew && newSessionModel === null,
     isAutoThinkingSelection: isNew && newSessionThinkingLevel === null,

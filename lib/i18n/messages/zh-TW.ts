@@ -212,6 +212,8 @@ export const zhTWLocale: LocalePlugin = {
     "sideChat.error.subagent": "子代理會話不能發起側聊",
     "sideChat.error.side": "側聊不能再次發起側聊",
     "agentSwitcher.sideChat": "側聊",
+    "subagent.readOnly.title": "子代理工作階段 · 唯讀",
+    "subagent.readOnly.hint": "這裡不能傳送訊息：請在主對話裡說明，由 Agent 工具轉達給子代理。",
     "subagentReports.pendingOne": "1 個背景子代理結果尚未讀取",
     "subagentReports.pending": "{count} 個背景子代理結果尚未讀取",
     "subagentReports.resumed": "已續跑",

@@ -3096,3 +3096,32 @@ span.token.table {
   opacity: 0.6;
   cursor: default;
 }
+
+/* A subagent tab's composer slot (ChatWindow's SubagentReadOnlyBar): the transcript
+   is read-only, so the place a composer would sit says so instead of offering one. */
+.chat-readonly-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 16px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.chat-readonly-bar > svg {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+}
+.chat-readonly-bar-title {
+  font-weight: 600;
+  color: var(--text);
+}
+.chat-readonly-bar-hint {
+  min-width: 0;
+  flex: 1 1 220px;
+  color: var(--text-dim);
+}

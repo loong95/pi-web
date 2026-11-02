@@ -259,6 +259,11 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   const { t } = useI18n();
   const isMobile = useIsMobile();
   const completionNotificationsEnabled = !isHiddenRelation(session?.relation);
+  // A subagent's transcript is an account of a run the parent started, not a chat
+  // to type into: upstream's panel gives it the full composer, which reads like the
+  // main chat and a message there starts a turn in the child. Pi Web keeps the tab
+  // read-only (docs/agents/subagents.md); side chats stay writable.
+  const readOnlySession = session?.relation?.kind === "subagent";
 
   // Wrap onAgentEnd to play the completion sound. This is more reliable than
   // wrapping handleAgentEventRef because useAgentSession overwrites that ref
@@ -804,6 +809,11 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   }, [onDrop]);
 
   const { isDragOver, handleDragEnter, handleDragOver, handleDragLeave, handleDrop } = useDragDrop(onDrop);
+  // A read-only transcript takes no drops either: an upload would write into the
+  // child's working directory, which only its own run decides.
+  const dropHandlers = readOnlySession
+    ? { onDragEnter: undefined, onDragOver: undefined, onDragLeave: undefined, onDrop: undefined }
+    : { onDragEnter: handleDragEnter, onDragOver: handleDragOver, onDragLeave: handleDragLeave, onDrop: handleDrop };
 
   const visibleMessages = messages.filter((m) => isMessageGroupAnchor(m) || m.role === "assistant");
   // Stable Map identity: `messages` doesn't change during streaming updates
@@ -1022,10 +1032,10 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     <div
       className="chat-content relative flex h-full min-w-0 flex-col overflow-hidden"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
-      onDragEnter={handleDragEnter}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
+      onDragEnter={dropHandlers.onDragEnter}
+      onDragOver={dropHandlers.onDragOver}
+      onDragLeave={dropHandlers.onDragLeave}
+      onDrop={dropHandlers.onDrop}
     >
       {isDragOver && (
         <div className="pointer-events-none absolute inset-0 z-50 flex animate-[drop-zone-in_0.15s_ease_both] items-center justify-center bg-[rgba(37,99,235,0.06)] backdrop-blur-[1px]">
@@ -1160,7 +1170,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                     searchBlock={entryIds[idx] === pendingSearchScroll?.entryId ? searchBlock : undefined}
                     onFork={bashRunning || isNew ? undefined : handleFork}
                     forking={forkingEntryId === entryIds[idx]}
-                    onEditContent={sessionBusy ? undefined : handleEditContent}
+                    onEditContent={sessionBusy || readOnlySession ? undefined : handleEditContent}
                     onCancelEdit={cancelEdit}
                     isEditing={editEntryId === entryIds[idx]}
                     showTimestamp={showTimestamp}
@@ -1512,20 +1522,40 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
             </div>
           </div>
         )}
-        {pendingSubagentReports.length > 0 && (
+        {/* A subagent's own pending reports are addressed to its model, not the user:
+            this tab has no composer to send them from, so they wait for the child's next
+            run or `get_subagent_result`. */}
+        {!readOnlySession && pendingSubagentReports.length > 0 && (
           <div style={{ padding: "0 16px", paddingRight: isMobile ? 16 : 52 }}>
             <PendingSubagentReports reports={pendingSubagentReports} onSend={handleDeliverSubagentReports} />
           </div>
         )}
-        {chatInputElement}
+        {readOnlySession ? <SubagentReadOnlyBar /> : chatInputElement}
         <ExtensionStatusBar
           statuses={extensionStatuses}
           widgets={extensionWidgets}
-          onCommand={handleSend}
+          onCommand={readOnlySession ? undefined : handleSend}
           commandsDisabled={sessionBusy}
         />
       </div>
       {isEmptyNew && <div className="min-h-0 flex-1" />}
+    </div>
+  );
+}
+
+// A subagent tab's composer slot: it says what the tab is and where a message
+// belongs, so the transcript is never mistaken for the main chat (there is no
+// input to type into).
+function SubagentReadOnlyBar() {
+  const { t } = useI18n();
+  return (
+    <div className="chat-readonly-bar" role="note">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="4" y="10" width="16" height="10" rx="2" />
+        <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+      </svg>
+      <span className="chat-readonly-bar-title">{t("subagent.readOnly.title")}</span>
+      <span className="chat-readonly-bar-hint">{t("subagent.readOnly.hint")}</span>
     </div>
   );
 }

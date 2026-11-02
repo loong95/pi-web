@@ -212,6 +212,8 @@ export const enLocale: LocalePlugin = {
     "sideChat.error.subagent": "A sub-agent session cannot start a side chat",
     "sideChat.error.side": "A side chat cannot start another side chat",
     "agentSwitcher.sideChat": "Side chat",
+    "subagent.readOnly.title": "Sub-agent transcript · read-only",
+    "subagent.readOnly.hint": "This tab takes no messages: ask in the main chat, and the Agent tools steer the sub-agent from there.",
     "subagentReports.pendingOne": "1 background subagent result not read yet",
     "subagentReports.pending": "{count} background subagent results not read yet",
     "subagentReports.resumed": "resumed",
